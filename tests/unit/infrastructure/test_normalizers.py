@@ -4,9 +4,9 @@ from pyatv.const import FeatureState, MediaType
 from pyatv.const import PowerState as PyPower
 from pyatv.interface import App, Playing
 
-from agenai_appletv_mcp.domain.enums import FeatureAvailability, PowerState
-from agenai_appletv_mcp.domain.enums import MediaType as DomainMedia
-from agenai_appletv_mcp.infrastructure.pyatv.normalizers import (
+from appletv_mcp.domain.enums import FeatureAvailability, PowerState
+from appletv_mcp.domain.enums import MediaType as DomainMedia
+from appletv_mcp.infrastructure.pyatv.normalizers import (
     normalize_app,
     normalize_feature_state,
     normalize_playing,

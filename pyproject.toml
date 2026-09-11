@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agenai-appletv-mcp"
+name = "appletv-mcp"
 version = "0.1.0"
-description = "Local MCP server for semantic Apple TV control via pyatv."
+description = "Apple TV MCP: local MCP server for semantic Apple TV control via pyatv."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14,<3.15"
@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agenai-appletv = "agenai_appletv_mcp.interfaces.cli.main:main"
+appletv-mcp = "appletv_mcp.interfaces.cli.main:main"
 
 [project.urls]
 Documentation = "https://github.com/trevor-nichols/appletv-mcp"
@@ -124,3 +124,6 @@ reportUnknownArgumentType = "warning"
 reportUnknownVariableType = "warning"
 reportUnknownLambdaType = "warning"
 reportPrivateUsage = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/appletv_mcp"]

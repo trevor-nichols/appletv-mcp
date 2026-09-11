@@ -3,10 +3,10 @@
 import pytest
 from pyatv.const import FeatureName
 
-from agenai_appletv_mcp.application.policies.capabilities import ensure_executable
-from agenai_appletv_mcp.domain.enums import FeatureAvailability, NormalizedOperation
-from agenai_appletv_mcp.domain.errors import FeatureUnavailableError, FeatureUnsupportedError
-from agenai_appletv_mcp.infrastructure.pyatv.feature_map import FEATURE_MAP
+from appletv_mcp.application.policies.capabilities import ensure_executable
+from appletv_mcp.domain.enums import FeatureAvailability, NormalizedOperation
+from appletv_mcp.domain.errors import FeatureUnavailableError, FeatureUnsupportedError
+from appletv_mcp.infrastructure.pyatv.feature_map import FEATURE_MAP
 
 
 def test_every_normalized_operation_has_feature_mapping() -> None:

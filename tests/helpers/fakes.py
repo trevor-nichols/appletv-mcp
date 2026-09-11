@@ -9,8 +9,8 @@ from typing import Any
 
 from pyatv.exceptions import NotSupportedError
 
-from agenai_appletv_mcp.application.ports.apple_tv import DiscoveredDevice
-from agenai_appletv_mcp.domain.enums import (
+from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
+from appletv_mcp.domain.enums import (
     FeatureAvailability,
     NormalizedOperation,
     PlaybackAction,
@@ -20,10 +20,10 @@ from agenai_appletv_mcp.domain.enums import (
     SkipDirection,
     VolumeDirection,
 )
-from agenai_appletv_mcp.domain.models.capabilities import AppleTVCapabilities
-from agenai_appletv_mcp.domain.models.device import AppInfo
-from agenai_appletv_mcp.domain.models.settings import Settings
-from agenai_appletv_mcp.domain.models.status import AppleTVStatus
+from appletv_mcp.domain.models.capabilities import AppleTVCapabilities
+from appletv_mcp.domain.models.device import AppInfo
+from appletv_mcp.domain.models.settings import Settings
+from appletv_mcp.domain.models.status import AppleTVStatus
 from tests.helpers.factories import (
     DEFAULT_IDENTIFIER,
     make_app,
@@ -42,7 +42,7 @@ class MemorySettingsRepository:
 
     def load(self) -> Settings:
         if self._settings is None:
-            from agenai_appletv_mcp.domain.errors import DeviceNotConfiguredError
+            from appletv_mcp.domain.errors import DeviceNotConfiguredError
 
             raise DeviceNotConfiguredError("No Apple TV is configured.")
         return self._settings

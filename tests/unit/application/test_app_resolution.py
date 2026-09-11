@@ -2,8 +2,8 @@
 
 import pytest
 
-from agenai_appletv_mcp.application.services.app_resolution import filter_apps, resolve_app
-from agenai_appletv_mcp.domain.errors import AmbiguousAppError, AppNotFoundError
+from appletv_mcp.application.services.app_resolution import filter_apps, resolve_app
+from appletv_mcp.domain.errors import AmbiguousAppError, AppNotFoundError
 from tests.helpers.factories import make_app
 
 APPS = [

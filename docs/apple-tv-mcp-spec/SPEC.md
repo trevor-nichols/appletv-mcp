@@ -1,7 +1,7 @@
-# AgenAI Apple TV MCP
+# Apple TV MCP
 
 **Status:** Approved v0.1 Specification  
-**Project:** `agenai-appletv-mcp`  
+**Project:** `appletv-mcp`  
 **Primary purpose:** Expose reliable, semantic Apple TV control to AI agents through a local MCP server backed by `pyatv`.
 
 ---
@@ -45,7 +45,7 @@ Recommended direct dependencies:
 
 ```toml
 [project]
-name = "agenai-appletv-mcp"
+name = "appletv-mcp"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 
@@ -55,6 +55,9 @@ dependencies = [
     "pydantic>=2.12,<3",
     "platformdirs",
 ]
+
+[project.scripts]
+appletv-mcp = "appletv_mcp.interfaces.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -251,7 +254,7 @@ Remote navigation is blind and non-idempotent.
 ## 5. Repository Structure
 
 ```text
-agenai-appletv-mcp/
+appletv-mcp/
 ├── pyproject.toml
 ├── uv.lock
 ├── .python-version
@@ -263,7 +266,7 @@ agenai-appletv-mcp/
 │   └── ...
 │
 ├── src/
-│   └── agenai_appletv_mcp/
+│   └── appletv_mcp/
 │       ├── __init__.py
 │       ├── server.py
 │       ├── lifespan.py
@@ -301,7 +304,9 @@ Example:
 }
 ```
 
-Use `platformdirs` to determine the application configuration directory.
+Use `platformdirs` with application name `appletv-mcp` to determine the application configuration directory.
+
+The configuration directory may be overridden with `APPLETV_MCP_CONFIG_DIR` for tests and unusual installs.
 
 Configuration semantics:
 
@@ -339,7 +344,7 @@ atvremote wizard
 Then:
 
 ```bash
-agenai-appletv configure
+appletv-mcp configure
 ```
 
 `configure` must:
@@ -600,7 +605,7 @@ Create an explicitly named and versioned server:
 
 ```python
 mcp = MCPServer(
-    "agenai-appletv",
+    "appletv-mcp",
     version="0.1.0",
     instructions=SERVER_INSTRUCTIONS,
     lifespan=app_lifespan,
@@ -1240,7 +1245,7 @@ Never use `print()` while serving MCP over stdio.
 Recommended defaults:
 
 ```text
-agenai_appletv_mcp    INFO
+appletv_mcp           INFO
 pyatv                 WARNING
 ```
 
@@ -1266,12 +1271,14 @@ not the text itself.
 
 ## 19. CLI
 
+The console executable is `appletv-mcp`.
+
 Initial commands:
 
 ```text
-agenai-appletv configure
-agenai-appletv doctor
-agenai-appletv serve
+appletv-mcp configure
+appletv-mcp doctor
+appletv-mcp serve
 ```
 
 ### 19.1 `configure`
@@ -1499,7 +1506,7 @@ unless observable `pyatv` state actually supports the claim.
 Add optional localhost Streamable HTTP:
 
 ```text
-agenai-appletv serve --transport http
+appletv-mcp serve --transport http
 ```
 
 Purpose:

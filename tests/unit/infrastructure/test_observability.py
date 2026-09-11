@@ -5,13 +5,13 @@ import logging
 import pytest
 from pyatv import exceptions as pyatv_exceptions
 
-from agenai_appletv_mcp.domain.errors import (
+from appletv_mcp.domain.errors import (
     DeviceConnectionError,
     FeatureUnsupportedError,
     PairingRequiredError,
 )
-from agenai_appletv_mcp.infrastructure.observability.redaction import RedactionFilter, redact
-from agenai_appletv_mcp.infrastructure.pyatv.exception_map import (
+from appletv_mcp.infrastructure.observability.redaction import RedactionFilter, redact
+from appletv_mcp.infrastructure.pyatv.exception_map import (
     is_optional_absence,
     translate_exception,
 )
@@ -26,10 +26,10 @@ def test_redact_credentials_and_hex() -> None:
 
 
 def test_redaction_filter_on_logger(caplog: pytest.LogCaptureFixture) -> None:
-    logger = logging.getLogger("agenai_appletv_mcp.tests.redaction")
+    logger = logging.getLogger("appletv_mcp.tests.redaction")
     logger.addFilter(RedactionFilter())
     secret = "a" * 40
-    with caplog.at_level(logging.INFO, logger="agenai_appletv_mcp.tests.redaction"):
+    with caplog.at_level(logging.INFO, logger="appletv_mcp.tests.redaction"):
         logger.info("token=%s", secret)
     assert secret not in caplog.text
     assert "[redacted]" in caplog.text
@@ -42,6 +42,7 @@ def test_translate_pairing_and_unsupported() -> None:
         may_have_been_delivered=False,
     )
     assert isinstance(pairing, PairingRequiredError)
+    assert "appletv-mcp configure" in str(pairing)
     unsupported = translate_exception(
         pyatv_exceptions.NotSupportedError("no"),
         operation="volume",

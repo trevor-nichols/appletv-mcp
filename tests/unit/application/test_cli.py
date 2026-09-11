@@ -7,16 +7,16 @@ from pathlib import Path
 import pytest
 from pyatv.interface import Storage
 
-from agenai_appletv_mcp.application.ports.apple_tv import DiscoveredDevice
-from agenai_appletv_mcp.application.services.apple_tv_controller import AppleTVController
-from agenai_appletv_mcp.composition import Runtime
-from agenai_appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
-from agenai_appletv_mcp.infrastructure.config.repository import FileSettingsRepository
-from agenai_appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
-from agenai_appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
-from agenai_appletv_mcp.interfaces.cli.commands.configure import ConfigureError, run_configure
-from agenai_appletv_mcp.interfaces.cli.commands.doctor import run_doctor
-from agenai_appletv_mcp.interfaces.cli.main import main
+from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
+from appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from appletv_mcp.composition import Runtime
+from appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
+from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
+from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
+from appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
+from appletv_mcp.interfaces.cli.commands.configure import ConfigureError, run_configure
+from appletv_mcp.interfaces.cli.commands.doctor import run_doctor
+from appletv_mcp.interfaces.cli.main import main
 from tests.helpers.factories import make_settings
 from tests.helpers.fakes import FakeGateway, discovered
 
@@ -39,7 +39,7 @@ async def test_configure_saves_selected_device(
         return [device]
 
     monkeypatch.setattr(
-        "agenai_appletv_mcp.interfaces.cli.commands.configure.PyAtvScanner.scan",
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvScanner.scan",
         fake_scan,
     )
 
@@ -54,7 +54,7 @@ async def test_configure_saves_selected_device(
         return DummyStorage()
 
     monkeypatch.setattr(
-        "agenai_appletv_mcp.interfaces.cli.commands.configure.PyAtvStorageAdapter",
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvStorageAdapter",
         fake_storage,
     )
 
@@ -71,7 +71,7 @@ async def test_configure_saves_selected_device(
         return DummyRuntime()
 
     monkeypatch.setattr(
-        "agenai_appletv_mcp.interfaces.cli.commands.configure.create_runtime",
+        "appletv_mcp.interfaces.cli.commands.configure.create_runtime",
         fake_create_runtime,
     )
 
@@ -182,12 +182,32 @@ async def test_run_doctor_uses_preferred_host_when_multicast_fails(tmp_path: Pat
     assert all(call["hosts"] for call in calls)
 
 
-def test_cli_help_and_unknown() -> None:
-    try:
+def test_cli_help_and_unknown(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
         main(["--help"])
-    except SystemExit as exc:
-        assert exc.code == 0
-    try:
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "appletv-mcp" in help_text
+    assert "Apple TV MCP" in help_text
+    assert "configure" in help_text
+    assert "doctor" in help_text
+    assert "serve" in help_text
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--version"])
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out.strip() == "appletv-mcp 0.1.0"
+
+    with pytest.raises(SystemExit) as exc_info:
         main(["nope"])
-    except SystemExit as exc:
-        assert exc.code == 2
+    assert exc_info.value.code == 2
+
+
+@pytest.mark.parametrize("command", ["configure", "doctor", "serve"])
+def test_cli_subcommand_help(command: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main([command, "--help"])
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert command in output
+    assert "appletv-mcp" in output

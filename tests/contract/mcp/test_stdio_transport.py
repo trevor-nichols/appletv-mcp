@@ -13,11 +13,11 @@ from tests.contract.mcp.test_tool_contract import EXPECTED_TOOLS
 async def test_stdio_tools_list_and_clean_shutdown() -> None:
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "agenai_appletv_mcp", "serve"],
+        args=["-m", "appletv_mcp", "serve"],
         cwd=str(Path.cwd()),
         env={
             **os.environ,
-            "AGENAI_APPLETV_CONFIG_DIR": "/tmp/agenai-appletv-mcp-stdio-test",
+            "APPLETV_MCP_CONFIG_DIR": "/tmp/appletv-mcp-stdio-test",
         },
     )
     async with Client(params) as client:

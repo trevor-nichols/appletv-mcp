@@ -1,12 +1,12 @@
-# AgenAI Apple TV MCP — Implementation Checklist
+# Apple TV MCP — Implementation Checklist
 
-**Status as of 2026-09-10:** software implementation, unit tests, MCP contract tests, and stdio transport tests are complete. **Live Apple TV validation was not executed** in this environment because no physical device was available.
+**Status as of 2026-09-11:** software implementation, unit tests, MCP contract tests, and stdio transport tests are complete. Product naming is Apple TV MCP (`appletv-mcp` / `appletv_mcp`). **Live Apple TV validation was not executed** in this environment because no physical device was available.
 
 ## Current project state
 
 Completed in software (mocked / no hardware):
 
-- Layered package under `src/agenai_appletv_mcp/` (domain, application, infrastructure, interfaces)
+- Layered package under `src/appletv_mcp/` (domain, application, infrastructure, interfaces)
 - Persistent config (atomic JSON, no credentials)
 - pyatv 0.18.0 `FileStorage` adapter compatible with `atvremote wizard`
 - Lazy connection manager, identifier-first discovery, preferred-host IPv4 unicast hint
@@ -19,7 +19,7 @@ Completed in software (mocked / no hardware):
 Not executed (hardware-dependent):
 
 - `atvremote wizard` against a real Apple TV
-- `agenai-appletv configure` / `doctor` against a real Apple TV
+- `appletv-mcp configure` / `doctor` against a real Apple TV
 - Live pytest suite (`APPLE_TV_INTEGRATION_TESTS=1`)
 - Disruptive live writes (`APPLE_TV_LIVE_WRITES=1`)
 - MCP Inspector GUI (stdio transport was verified with the MCP Python SDK in-process client and a real stdio subprocess)
@@ -30,12 +30,21 @@ Not executed (hardware-dependent):
 - Architecture follows the layered tree in the development prompt, not the flat sketch in SPEC §5.
 - `preferred_host` is IPv4-only. pyatv 0.18.0 unicast `scan(hosts=...)` uses `IPv4Address`; hostnames are rejected at Settings validation.
 - `apple_tv_status` returns `connection=unreachable` after read retry exhaustion instead of always raising `ToolError`, so agents can inspect identity without treating an offline TV as a protocol failure. Write tools still surface `ToolError`.
-- Config directory can be overridden with `AGENAI_APPLETV_CONFIG_DIR` (tests and unusual installs).
+- Config directory can be overridden with `APPLETV_MCP_CONFIG_DIR` (tests and unusual installs).
+- Naming normalized to Apple TV MCP: distribution/CLI/MCP server `appletv-mcp`, import package `appletv_mcp` under `src/appletv_mcp/`, platformdirs app name `appletv-mcp`, config override `APPLETV_MCP_CONFIG_DIR`. No compatibility shims for former names.
 - `doctor` uses `OK`/`FAIL` words rather than symbols for screen-reader-friendly output.
 - `doctor` discovers the configured device through `ConnectionManager.resolve_device()` (preferred-host unicast, then identifier multicast), not a second scan algorithm.
 - Connection validity is separate from ownership: `invalidate()` marks the cached `pyatv` session stale and retains the object; `reconnect()`, `disconnect()`, `get()`, and `close()` close it.
 - `apple_tv_open_url` is non-idempotent (`idempotent_hint=False`) because deep links may have side effects. `apple_tv_open_app` by resolved bundle ID remains idempotent.
 - MCP Inspector GUI was not available; `tests/contract/mcp/test_stdio_transport.py` exercises the real stdio process.
+
+### Naming normalization (complete)
+
+- [x] Product name Apple TV MCP.
+- [x] Distribution, CLI, MCP server, and platformdirs app name: `appletv-mcp`.
+- [x] Import package `appletv_mcp` under `src/appletv_mcp/`.
+- [x] Config override `APPLETV_MCP_CONFIG_DIR` (previous override names removed; no shim).
+- [x] GitHub URLs `https://github.com/trevor-nichols/appletv-mcp` and `/issues`.
 
 ---
 
@@ -49,14 +58,14 @@ The goal is to eliminate architectural decision-making during implementation: la
 
 ### 0.1 Create repository structure
 
-- [x] Create `agenai-appletv-mcp/`.
+- [x] Create `appletv-mcp/`.
 - [x] Add `SPEC.md`.
 - [x] Add `IMPLEMENTATION_CHECKLIST.md`.
 - [x] Add `README.md`.
 - [x] Add `.gitignore`.
 - [x] Add `.python-version`.
 - [x] Add `references/`.
-- [x] Add `src/agenai_appletv_mcp/`.
+- [x] Add `src/appletv_mcp/`.
 - [x] Add `tests/`.
 
 ### 0.2 Pin runtime
@@ -758,7 +767,7 @@ Shutdown:
 
 Create explicitly:
 
-- [x] Name `agenai-appletv`.
+- [x] Name `appletv-mcp`.
 - [x] Version `0.1.0`.
 - [x] Lifespan.
 - [x] Server instructions.
@@ -1052,7 +1061,7 @@ Depends on Phase 10.
 
 ### 17.1 Command
 
-- [x] Add `agenai-appletv serve`.
+- [x] Add `appletv-mcp serve`.
 - [x] Start stdio MCP server.
 - [x] No normal stdout output.
 - [x] Support debug logging flag if useful.
@@ -1060,7 +1069,7 @@ Depends on Phase 10.
 ### 17.2 Packaging entrypoint
 
 - [x] Add console-script entry point.
-- [x] Verify `uv run agenai-appletv serve`.
+- [x] Verify `uv run appletv-mcp serve`.
 - [x] Verify installed command execution.
 
 ### Exit criteria
@@ -1078,7 +1087,7 @@ Depends on Phases 14 and 17.
 Document command form:
 
 ```text
-uv --directory /absolute/path/to/agenai-appletv-mcp run agenai-appletv serve
+uv --directory /absolute/path/to/appletv-mcp run appletv-mcp serve
 ```
 
 or installed executable path.
@@ -1122,8 +1131,8 @@ This phase validates pinned `pyatv` assumptions against the real device.
 ### 19.1 Pairing/setup
 
 - [ ] Run `atvremote wizard` if credentials do not already exist.
-- [ ] Run `agenai-appletv configure`.
-- [ ] Run `agenai-appletv doctor`.
+- [ ] Run `appletv-mcp configure`.
+- [ ] Run `appletv-mcp doctor`.
 
 ### 19.2 Read-only validation
 

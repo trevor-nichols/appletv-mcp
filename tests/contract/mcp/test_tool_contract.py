@@ -8,9 +8,9 @@ from mcp import Client
 from mcp.server import MCPServer
 from mcp.types import ListToolsResult, TextContent, Tool, ToolAnnotations
 
-from agenai_appletv_mcp.application.services.apple_tv_controller import AppleTVController
-from agenai_appletv_mcp.interfaces.mcp.lifespan import AppContext
-from agenai_appletv_mcp.interfaces.mcp.server import create_mcp_server
+from appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from appletv_mcp.interfaces.mcp.lifespan import AppContext
+from appletv_mcp.interfaces.mcp.server import create_mcp_server
 from tests.helpers.fakes import FakeGateway
 
 EXPECTED_TOOLS = [
@@ -69,6 +69,7 @@ def _enum_values(schema: dict[str, Any], field: str) -> set[str]:
 
 async def test_exact_tool_inventory() -> None:
     server, gateway = _server()
+    assert server.name == "appletv-mcp"
     async with Client(server, raise_exceptions=True) as client:
         listed = await client.list_tools()
     names = [tool.name for tool in listed.tools]

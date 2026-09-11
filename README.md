@@ -1,4 +1,4 @@
-# AgenAI Apple TV MCP
+# Apple TV MCP
 
 Local MCP server that exposes **semantic Apple TV control** to AI agents. It is backed by [`pyatv`](https://pyatv.dev/) 0.18.0 and speaks MCP over stdio. The model should think in terms of power, apps, playback, text, and volume — not Companion, MRP, or AirPlay.
 
@@ -54,7 +54,7 @@ cd appletv-mcp
 uv sync --locked
 ```
 
-The console entrypoint is `agenai-appletv`.
+The console entrypoint is `appletv-mcp`.
 
 ## Pairing
 
@@ -69,7 +69,7 @@ Follow the PIN prompts until the device is set up. Repeat for every protocol the
 ## Configure
 
 ```bash
-uv run agenai-appletv configure
+uv run appletv-mcp configure
 ```
 
 This scans the network, lets you select one Apple TV, and writes a device profile (identifier, display name, last-known IPv4 host, timeouts) under the platform config directory. Credentials are not copied into that file.
@@ -77,7 +77,7 @@ This scans the network, lets you select one Apple TV, and writes a device profil
 ## Doctor
 
 ```bash
-uv run agenai-appletv doctor
+uv run appletv-mcp doctor
 ```
 
 Non-destructive checks, one per line, screen-reader friendly. Exits non-zero when a required prerequisite fails (configuration, storage, discovery, identity, or connection).
@@ -85,7 +85,7 @@ Non-destructive checks, one per line, screen-reader friendly. Exits non-zero whe
 ## Serve
 
 ```bash
-uv run agenai-appletv serve
+uv run appletv-mcp serve
 ```
 
 Starts the MCP server on **stdio**. Application logs go to stderr. Do not write anything else to stdout while serving.
@@ -93,7 +93,7 @@ Starts the MCP server on **stdio**. Application logs go to stderr. Do not write 
 Debug logging:
 
 ```bash
-uv run agenai-appletv serve --debug
+uv run appletv-mcp serve --debug
 ```
 
 ## MCP host configuration
@@ -103,13 +103,13 @@ Use an absolute project path. Example generic stdio config:
 ```json
 {
   "mcpServers": {
-    "agenai-appletv": {
+    "appletv-mcp": {
       "command": "uv",
       "args": [
         "--directory",
         "/absolute/path/to/appletv-mcp",
         "run",
-        "agenai-appletv",
+        "appletv-mcp",
         "serve"
       ]
     }
@@ -117,13 +117,13 @@ Use an absolute project path. Example generic stdio config:
 }
 ```
 
-Installed executable form, if `agenai-appletv` is on `PATH`:
+Installed executable form, if `appletv-mcp` is on `PATH`:
 
 ```json
 {
   "mcpServers": {
-    "agenai-appletv": {
-      "command": "/absolute/path/to/agenai-appletv",
+    "appletv-mcp": {
+      "command": "/absolute/path/to/appletv-mcp",
       "args": ["serve"]
     }
   }
@@ -160,7 +160,7 @@ Remote navigation is a last resort. Prefer `apple_tv_open_app`, playback, seek, 
 
 | Symptom | What to try |
 | --- | --- |
-| MCP starts but tools fail | `agenai-appletv doctor` |
+| MCP starts but tools fail | `appletv-mcp doctor` |
 | Device not found | Confirm same LAN, wake the TV, re-run `configure` |
 | Pairing / authentication errors | `atvremote wizard` again, then `configure` |
 | IP changed | Normal. Identifier discovery should update `preferred_host` |

@@ -9,11 +9,11 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from agenai_appletv_mcp.composition import Runtime, create_runtime
-from agenai_appletv_mcp.domain.enums import ConnectionState, FeatureAvailability
-from agenai_appletv_mcp.domain.errors import DeviceNotConfiguredError
-from agenai_appletv_mcp.domain.models.status import AppleTVStatus
-from agenai_appletv_mcp.infrastructure.config.repository import FileSettingsRepository
+from appletv_mcp.composition import Runtime, create_runtime
+from appletv_mcp.domain.enums import ConnectionState, FeatureAvailability
+from appletv_mcp.domain.errors import DeviceNotConfiguredError
+from appletv_mcp.domain.models.status import AppleTVStatus
+from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 
 pytestmark = pytest.mark.live
 

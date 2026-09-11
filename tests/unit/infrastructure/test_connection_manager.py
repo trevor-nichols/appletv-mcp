@@ -5,9 +5,9 @@ from collections.abc import Sequence
 
 import pytest
 
-from agenai_appletv_mcp.application.ports.apple_tv import DiscoveredDevice
-from agenai_appletv_mcp.domain.errors import DeviceNotFoundError
-from agenai_appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
+from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
+from appletv_mcp.domain.errors import DeviceNotFoundError
+from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
 from tests.helpers.factories import make_settings
 from tests.helpers.fakes import FakeAppleTV, FakeScanner, MemorySettingsRepository, discovered
 

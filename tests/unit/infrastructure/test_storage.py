@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from agenai_appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
+from appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
 
 
 async def test_storage_load_and_close(tmp_path: Path) -> None:

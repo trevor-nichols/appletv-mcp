@@ -5,9 +5,9 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from agenai_appletv_mcp.domain.enums import PowerState, PressAction, RemoteButton
-from agenai_appletv_mcp.domain.models.results import PressResult, VolumeResult
-from agenai_appletv_mcp.domain.models.settings import Settings
+from appletv_mcp.domain.enums import PowerState, PressAction, RemoteButton
+from appletv_mcp.domain.models.results import PressResult, VolumeResult
+from appletv_mcp.domain.models.settings import Settings
 from tests.helpers.factories import make_settings, make_status
 
 

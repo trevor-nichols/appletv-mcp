@@ -4,11 +4,11 @@ import logging
 
 import pytest
 
-from agenai_appletv_mcp.application.services.apple_tv_controller import (
+from appletv_mcp.application.services.apple_tv_controller import (
     AppleTVController,
     validate_deep_link,
 )
-from agenai_appletv_mcp.domain.enums import (
+from appletv_mcp.domain.enums import (
     FeatureAvailability,
     KeyboardFocus,
     NormalizedOperation,
@@ -19,7 +19,7 @@ from agenai_appletv_mcp.domain.enums import (
     SkipDirection,
     VolumeDirection,
 )
-from agenai_appletv_mcp.domain.errors import (
+from appletv_mcp.domain.errors import (
     AmbiguousAppError,
     AppNotFoundError,
     DeviceConnectionError,
@@ -297,7 +297,7 @@ async def test_set_text_is_absent_from_logs(caplog: pytest.LogCaptureFixture) ->
     controller, gateway = _controller()
     gateway.status_value = make_status(keyboard_focus=KeyboardFocus.FOCUSED)
     secret = "hunter2-keyboard-secret"
-    with caplog.at_level(logging.DEBUG, logger="agenai_appletv_mcp"):
+    with caplog.at_level(logging.DEBUG, logger="appletv_mcp"):
         await controller.set_text(secret)
     combined = " ".join(record.getMessage() for record in caplog.records)
     assert secret not in combined

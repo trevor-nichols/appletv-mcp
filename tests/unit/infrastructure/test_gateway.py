@@ -4,10 +4,10 @@ from collections.abc import Callable
 
 from pyatv.exceptions import ConnectionLostError, NotSupportedError
 
-from agenai_appletv_mcp.application.services.apple_tv_controller import AppleTVController
-from agenai_appletv_mcp.domain.enums import ConnectionState
-from agenai_appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
-from agenai_appletv_mcp.infrastructure.pyatv.gateway import PyAtvGateway
+from appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from appletv_mcp.domain.enums import ConnectionState
+from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
+from appletv_mcp.infrastructure.pyatv.gateway import PyAtvGateway
 from tests.helpers.factories import make_settings
 from tests.helpers.fakes import FakeAppleTV, FakeScanner, MemorySettingsRepository, discovered
 

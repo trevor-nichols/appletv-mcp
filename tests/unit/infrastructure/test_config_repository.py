@@ -5,9 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from agenai_appletv_mcp.domain.errors import ConfigurationError, DeviceNotConfiguredError
-from agenai_appletv_mcp.infrastructure.config.repository import FileSettingsRepository
+from appletv_mcp.domain.errors import ConfigurationError, DeviceNotConfiguredError
+from appletv_mcp.infrastructure.config.paths import CONFIG_DIR_ENV, config_dir
+from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 from tests.helpers.factories import make_settings
+
+
+def test_config_dir_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert CONFIG_DIR_ENV == "APPLETV_MCP_CONFIG_DIR"
+    monkeypatch.setenv(CONFIG_DIR_ENV, str(tmp_path))
+    assert config_dir() == tmp_path
 
 
 def test_round_trip_save_load(tmp_path: Path) -> None:

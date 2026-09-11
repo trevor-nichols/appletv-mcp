@@ -1,6 +1,6 @@
 """Reusable model factories for tests."""
 
-from agenai_appletv_mcp.domain.enums import (
+from appletv_mcp.domain.enums import (
     ConnectionState,
     FeatureAvailability,
     KeyboardFocus,
@@ -8,11 +8,11 @@ from agenai_appletv_mcp.domain.enums import (
     PlaybackState,
     PowerState,
 )
-from agenai_appletv_mcp.domain.models.capabilities import AppleTVCapabilities
-from agenai_appletv_mcp.domain.models.device import AppInfo, DeviceInfo
-from agenai_appletv_mcp.domain.models.playback import PlaybackInfo
-from agenai_appletv_mcp.domain.models.settings import Settings
-from agenai_appletv_mcp.domain.models.status import AppleTVStatus
+from appletv_mcp.domain.models.capabilities import AppleTVCapabilities
+from appletv_mcp.domain.models.device import AppInfo, DeviceInfo
+from appletv_mcp.domain.models.playback import PlaybackInfo
+from appletv_mcp.domain.models.settings import Settings
+from appletv_mcp.domain.models.status import AppleTVStatus
 
 DEFAULT_IDENTIFIER = "AA:BB:CC:DD:EE:FF"
 

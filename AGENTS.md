@@ -1,8 +1,45 @@
-This file defines repository-wide instructions for coding agents working on `agenai-appletv-mcp`.
+This file defines repository-wide instructions for coding agents working on Apple TV MCP (`appletv-mcp`).
 
 These instructions apply to the entire repository unless a more specific nested `AGENTS.md` explicitly overrides them for a subtree.
 
 The project is a production-quality local MCP server that exposes semantic Apple TV control to AI agents through `pyatv`. Treat it as infrastructure software, not a demo.
+
+This project is named Apple TV MCP and is independent of AgenAI.
+Do not introduce AgenAI branding, package prefixes, CLI prefixes, repository
+links, environment-variable prefixes, or other AgenAI-specific naming.
+
+---
+
+## Naming
+
+Use these canonical names. Do not invent aliases, shims, or "compatible" old names.
+
+```text
+Human/product name:                              Apple TV MCP
+GitHub repository:                               trevor-nichols/appletv-mcp
+Python distribution/project name:                appletv-mcp
+Python import package:                           appletv_mcp
+Source package:                                  src/appletv_mcp/
+CLI executable:                                  appletv-mcp
+MCP server name:                                 appletv-mcp
+Configuration application/directory name:        appletv-mcp
+Configuration override environment variable:     APPLETV_MCP_CONFIG_DIR
+```
+
+Do not use:
+
+```text
+AgenAI Apple TV MCP
+agenai-appletv-mcp
+agenai_appletv_mcp
+agenai-appletv
+AGENAI_APPLETV_CONFIG_DIR
+github.com/agenai/...
+```
+
+MCP tool names remain `apple_tv_*` as listed in §8. Domain types such as `AppleTVController`, `AppleTVStatus`, and `AppleTVGateway` are not product-prefix names; do not rename them.
+
+Live-test environment variables `APPLE_TV_INTEGRATION_TESTS` and `APPLE_TV_LIVE_WRITES` are unrelated to product branding; do not rename them.
 
 ---
 
@@ -134,7 +171,7 @@ Preferred shape:
 
 ```text
 src/
-└── agenai_appletv_mcp/
+└── appletv_mcp/
     ├── domain/
     │   ├── enums.py
     │   ├── errors.py
@@ -463,7 +500,9 @@ scan_timeout_seconds    finite and > 0
 command_timeout_seconds finite and > 0
 ```
 
-Use `platformdirs` for application paths.
+Use `platformdirs` with application name `appletv-mcp` for application paths.
+
+The configuration directory may be overridden with `APPLETV_MCP_CONFIG_DIR` (tests and unusual installs). Do not introduce other environment-variable prefixes.
 
 Configuration writes should be atomic.
 
@@ -762,7 +801,7 @@ Application logs belong on stderr.
 Recommended defaults:
 
 ```text
-agenai_appletv_mcp    INFO
+appletv_mcp           INFO
 pyatv                 WARNING
 ```
 
@@ -856,9 +895,9 @@ Annotations are metadata, not security controls.
 Implement:
 
 ```text
-agenai-appletv configure
-agenai-appletv doctor
-agenai-appletv serve
+appletv-mcp configure
+appletv-mcp doctor
+appletv-mcp serve
 ```
 
 CLI commands should reuse application/infrastructure services.
