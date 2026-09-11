@@ -652,14 +652,16 @@ next
 previous
 relative skip
 relative volume adjustment
+deep-link / URL launch
 ```
 
 If a connection fails after a non-idempotent command may have been delivered:
 
 1. Invalidate the connection.
-2. Do not replay the command.
-3. Raise an uncertainty error.
-4. Translate it into `ToolError`.
+2. Close/dispose the retained session without opening a replacement.
+3. Do not replay the command.
+4. Raise an uncertainty error.
+5. Translate it into `ToolError`.
 
 Error text should explain why retry did not occur.
 
@@ -839,7 +841,7 @@ idempotent_hint=True
 open_world_hint=False
 ```
 
-Relative/toggle operations:
+Relative/toggle operations and deep-link launches:
 
 ```text
 idempotent_hint=False
@@ -861,7 +863,9 @@ agenai-appletv serve
 
 CLI commands should reuse application/infrastructure services.
 
-Do not duplicate Apple TV behavior in command modules.
+Do not duplicate Apple TV behavior in command modules. `doctor` must use the
+same discovery path as the running server (preferred-host unicast, then
+identifier fallback), not a multicast-only shortcut.
 
 ### `configure`
 

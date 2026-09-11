@@ -30,8 +30,8 @@ dependencies = [
 agenai-appletv = "agenai_appletv_mcp.interfaces.cli.main:main"
 
 [project.urls]
-Documentation = "https://github.com/agenai/agenai-appletv-mcp"
-Issues = "https://github.com/agenai/agenai-appletv-mcp/issues"
+Documentation = "https://github.com/trevor-nichols/appletv-mcp"
+Issues = "https://github.com/trevor-nichols/appletv-mcp/issues"
 
 [dependency-groups]
 dev = [

@@ -2,10 +2,12 @@
 
 import argparse
 import asyncio
+import math
 import sys
 from collections.abc import Awaitable, Sequence
 
 from agenai_appletv_mcp._version import __version__
+from agenai_appletv_mcp.domain.errors import AppleTVError
 from agenai_appletv_mcp.infrastructure.observability.logging import configure_logging
 from agenai_appletv_mcp.interfaces.cli.commands.configure import ConfigureError, run_configure
 from agenai_appletv_mcp.interfaces.cli.commands.doctor import run_doctor
@@ -26,6 +28,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2
 
 
+def _positive_timeout(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agenai-appletv",
@@ -37,7 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
     configure = sub.add_parser("configure", help="Discover and save the target Apple TV.")
     configure.add_argument(
         "--scan-timeout",
-        type=float,
+        type=_positive_timeout,
         default=5.0,
         help="Discovery timeout in seconds (default: 5).",
     )
@@ -61,6 +73,9 @@ async def _configure(args: argparse.Namespace) -> int:
     except ConfigureError as exc:
         sys.stderr.write(f"{exc}\n")
         return exc.exit_code
+    except AppleTVError as exc:
+        sys.stderr.write(f"{exc.message}\n")
+        return 1
 
 
 def _run_async(coro: Awaitable[int]) -> int:

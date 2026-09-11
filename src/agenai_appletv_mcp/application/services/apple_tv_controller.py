@@ -138,7 +138,7 @@ class AppleTVController:
             await self._gateway.launch_app(validated)
             return OpenUrlResult(url=validated, accepted=True)
 
-        return await self._write(OperationKind.IDEMPOTENT_WRITE, "open url", _open)
+        return await self._write(OperationKind.NON_IDEMPOTENT, "open url", _open)
 
     async def press(self, button: RemoteButton, action: PressAction, count: int) -> PressResult:
         completed = 0

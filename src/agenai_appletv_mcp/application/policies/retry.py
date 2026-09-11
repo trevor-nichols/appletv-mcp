@@ -42,6 +42,7 @@ async def _recover[T](
     gateway.invalidate()
 
     if kind is OperationKind.NON_IDEMPOTENT and delivered:
+        await gateway.disconnect()
         raise UncertainExecutionError(
             f"The connection was lost after the {operation_label} command may have "
             "been delivered. The command was not retried to avoid executing it twice."
@@ -57,4 +58,5 @@ async def _recover[T](
         return await action()
     except _CONNECTION_ERRORS as retry_error:
         gateway.invalidate()
+        await gateway.disconnect()
         raise retry_error from exc

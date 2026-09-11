@@ -1,5 +1,6 @@
 """Interactive device profile setup."""
 
+import math
 from collections.abc import Callable, Sequence
 from typing import TextIO
 
@@ -22,6 +23,12 @@ class ConfigureError(Exception):
         self.exit_code = exit_code
 
 
+def validate_scan_timeout(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        raise ConfigureError("Scan timeout must be a finite number greater than zero.")
+    return value
+
+
 async def run_configure(
     *,
     stdin: TextIO,
@@ -31,38 +38,49 @@ async def run_configure(
     settings_repository: FileSettingsRepository | None = None,
     storage: PyAtvStorageAdapter | None = None,
 ) -> int:
+    timeout = validate_scan_timeout(scan_timeout_seconds)
     repository = settings_repository or FileSettingsRepository()
     storage_adapter = storage or PyAtvStorageAdapter()
-    pyatv_storage = await storage_adapter.load()
-    scanner = PyAtvScanner(pyatv_storage)
-    stdout.write("Scanning for Apple TVs...\n")
-    devices = await scanner.scan(timeout=scan_timeout_seconds)
-    if not devices:
-        raise ConfigureError(
-            "No Apple TVs were discovered. Confirm the TV is on the same network "
-            "and that pairing exists in `atvremote` storage (`atvremote wizard`)."
-        )
-    stdout.write("Discovered devices:\n")
-    for index, device in enumerate(devices, start=1):
-        stdout.write(
-            render_device_row(index, device.name, device.identifier, device.address) + "\n"
-        )
-    chosen = (selector or _prompt_selector(stdin, stdout))(devices)
-    settings = Settings(
-        device_identifier=chosen.identifier,
-        device_name=chosen.name,
-        preferred_host=chosen.address,
-        scan_timeout_seconds=scan_timeout_seconds,
-    )
-    repository.save(settings)
-    stdout.write(f"Saved identifier={settings.device_identifier} host={settings.preferred_host}\n")
-    runtime = await create_runtime(settings_repository=repository, storage=storage_adapter)
+    runtime = None
     try:
+        pyatv_storage = await storage_adapter.load()
+        scanner = PyAtvScanner(pyatv_storage)
+        stdout.write("Scanning for Apple TVs...\n")
+        devices = await scanner.scan(timeout=timeout)
+        if not devices:
+            raise ConfigureError(
+                "No Apple TVs were discovered. Confirm the TV is on the same network "
+                "and that pairing exists in `atvremote` storage (`atvremote wizard`)."
+            )
+        stdout.write("Discovered devices:\n")
+        for index, device in enumerate(devices, start=1):
+            stdout.write(
+                render_device_row(index, device.name, device.identifier, device.address) + "\n"
+            )
+        chosen = (selector or _prompt_selector(stdin, stdout))(devices)
+        settings = Settings(
+            device_identifier=chosen.identifier,
+            device_name=chosen.name,
+            preferred_host=chosen.address,
+            scan_timeout_seconds=timeout,
+        )
+        repository.save(settings)
+        stdout.write(
+            f"Saved identifier={settings.device_identifier} host={settings.preferred_host}\n"
+        )
+        runtime = await create_runtime(settings_repository=repository, storage=storage_adapter)
         await _verify(runtime.controller, stdout)
+        stdout.write(f"Configuration written to {repository.path}\n")
+        return 0
+    except ConfigureError:
+        raise
+    except AppleTVError as exc:
+        raise ConfigureError(exc.message) from exc
     finally:
-        await runtime.aclose()
-    stdout.write(f"Configuration written to {repository.path}\n")
-    return 0
+        if runtime is not None:
+            await runtime.aclose()
+        else:
+            await storage_adapter.close()
 
 
 def _prompt_selector(stdin: TextIO, stdout: TextIO) -> Selector:

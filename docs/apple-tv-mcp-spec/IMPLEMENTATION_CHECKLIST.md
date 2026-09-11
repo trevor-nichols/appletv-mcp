@@ -32,6 +32,9 @@ Not executed (hardware-dependent):
 - `apple_tv_status` returns `connection=unreachable` after read retry exhaustion instead of always raising `ToolError`, so agents can inspect identity without treating an offline TV as a protocol failure. Write tools still surface `ToolError`.
 - Config directory can be overridden with `AGENAI_APPLETV_CONFIG_DIR` (tests and unusual installs).
 - `doctor` uses `OK`/`FAIL` words rather than symbols for screen-reader-friendly output.
+- `doctor` discovers the configured device through `ConnectionManager.resolve_device()` (preferred-host unicast, then identifier multicast), not a second scan algorithm.
+- Connection validity is separate from ownership: `invalidate()` marks the cached `pyatv` session stale and retains the object; `reconnect()`, `disconnect()`, `get()`, and `close()` close it.
+- `apple_tv_open_url` is non-idempotent (`idempotent_hint=False`) because deep links may have side effects. `apple_tv_open_app` by resolved bundle ID remains idempotent.
 - MCP Inspector GUI was not available; `tests/contract/mcp/test_stdio_transport.py` exercises the real stdio process.
 
 ---
@@ -274,6 +277,7 @@ Implement:
 class ConnectionManager:
     async def get(self) -> AppleTV: ...
     async def reconnect(self) -> AppleTV: ...
+    async def disconnect(self) -> None: ...
     async def close(self) -> None: ...
     def invalidate(self) -> None: ...
 ```
@@ -309,6 +313,7 @@ class ConnectionManager:
 
 - [x] Invalidate cached connection on disconnect callback.
 - [x] Invalidate cached connection on known broken-connection failures.
+- [x] Mark the cached session stale without dropping ownership; close the retained handle on reconnect, disconnect, get, or close.
 - [x] Preserve persistent credentials.
 - [x] Preserve device profile.
 
@@ -332,7 +337,7 @@ Test:
 - [x] Preferred-host update after rediscovery.
 - [x] Concurrent `get()` calls.
 - [x] Explicit reconnect.
-- [x] Invalidation.
+- [x] Invalidation retains the connection until reconnect/disconnect/close.
 - [x] Close.
 - [x] Connection failure translation.
 
@@ -843,6 +848,7 @@ Implement:
 - [x] Typed `url`.
 - [x] Typed result.
 - [x] Tool description avoids claiming visual verification.
+- [x] `idempotent_hint=False` (deep links are not retried after uncertain delivery).
 
 ### 12.4 `apple_tv_seek`
 
@@ -994,6 +1000,9 @@ Can be implemented earlier after Phase 5, but should be complete before live-dev
 - [x] Device disappears.
 - [x] Connection rejected.
 - [x] Invalid selection.
+- [x] Invalid `--scan-timeout` rejected at argparse (positive finite).
+- [x] Expected Apple TV errors become one-line CLI errors.
+- [x] Storage adapter closed if configure exits before Runtime ownership.
 
 ### Exit criteria
 
@@ -1013,6 +1022,7 @@ Implement non-destructive checks for:
 - [x] Configuration validates.
 - [x] `pyatv` storage loads.
 - [x] Configured identifier can be discovered.
+- [x] Discovery reuses the production resolver (preferred-host unicast, then identifier fallback).
 - [x] Preferred host matches or can be repaired.
 - [x] Connection succeeds.
 - [x] Power capability.

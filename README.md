@@ -49,8 +49,8 @@ Domain types never import `pyatv` or MCP. MCP tools never call `pyatv` directly.
 ## Installation
 
 ```bash
-git clone https://github.com/agenai/agenai-appletv-mcp.git
-cd agenai-appletv-mcp
+git clone https://github.com/trevor-nichols/appletv-mcp.git
+cd appletv-mcp
 uv sync --locked
 ```
 
@@ -107,7 +107,7 @@ Use an absolute project path. Example generic stdio config:
       "command": "uv",
       "args": [
         "--directory",
-        "/absolute/path/to/agenai-appletv-mcp",
+        "/absolute/path/to/appletv-mcp",
         "run",
         "agenai-appletv",
         "serve"

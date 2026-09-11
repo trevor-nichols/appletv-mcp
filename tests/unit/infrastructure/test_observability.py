@@ -11,7 +11,10 @@ from agenai_appletv_mcp.domain.errors import (
     PairingRequiredError,
 )
 from agenai_appletv_mcp.infrastructure.observability.redaction import RedactionFilter, redact
-from agenai_appletv_mcp.infrastructure.pyatv.exception_map import translate_exception
+from agenai_appletv_mcp.infrastructure.pyatv.exception_map import (
+    is_optional_absence,
+    translate_exception,
+)
 
 
 def test_redact_credentials_and_hex() -> None:
@@ -53,3 +56,11 @@ def test_translate_pairing_and_unsupported() -> None:
     assert isinstance(lost, DeviceConnectionError)
     assert lost.may_have_been_delivered is True
     assert "credentials" not in str(pairing).lower() or "pairing" in str(pairing).lower()
+
+
+def test_optional_absence_excludes_transport_errors() -> None:
+    assert is_optional_absence(pyatv_exceptions.NotSupportedError("no")) is True
+    assert is_optional_absence(pyatv_exceptions.InvalidStateError("busy")) is True
+    assert is_optional_absence(pyatv_exceptions.ConnectionLostError("gone")) is False
+    assert is_optional_absence(pyatv_exceptions.OperationTimeoutError("slow")) is False
+    assert is_optional_absence(pyatv_exceptions.AuthenticationError("auth")) is False

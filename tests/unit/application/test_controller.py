@@ -54,6 +54,8 @@ async def test_status_unreachable_after_retry_exhaustion() -> None:
     controller, _ = _controller(gateway)
     status = await controller.status()
     assert status.connection.value == "unreachable"
+    assert gateway.reconnect_calls == 1
+    assert gateway.disconnect_calls == 1
 
 
 async def test_read_retry_succeeds() -> None:
@@ -126,6 +128,34 @@ async def test_open_url_accepts_custom_scheme() -> None:
     result = await controller.open_url("youtube://watch?v=1")
     assert result.accepted is True
     assert gateway.launch_log == ["youtube://watch?v=1"]
+
+
+async def test_open_url_not_replayed_after_uncertain_failure() -> None:
+    controller, gateway = _controller()
+    gateway.fail(DeviceConnectionError("lost", may_have_been_delivered=True), "launch_app")
+    with pytest.raises(UncertainExecutionError, match="not retried"):
+        await controller.open_url("youtube://watch?v=1")
+    assert gateway.launch_log == []
+    assert gateway.reconnect_calls == 0
+    assert gateway.invalidate_calls == 1
+    assert gateway.disconnect_calls == 1
+
+
+async def test_open_app_is_retried_after_uncertain_failure() -> None:
+    controller, gateway = _controller()
+    gateway.fail(DeviceConnectionError("lost", may_have_been_delivered=True), "launch_app")
+    original = gateway.reconnect
+
+    async def reconnect() -> None:
+        await original()
+        gateway.fail_with = None
+
+    gateway.reconnect = reconnect  # type: ignore[method-assign]
+    result = await controller.open_app("com.netflix.Netflix")
+    assert result.launched is True
+    assert gateway.launch_log == ["com.netflix.Netflix"]
+    assert gateway.reconnect_calls == 1
+    assert gateway.disconnect_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -217,6 +247,7 @@ async def test_toggle_not_replayed_after_uncertain_failure() -> None:
         await controller.playback(PlaybackAction.TOGGLE)
     assert gateway.reconnect_calls == 0
     assert gateway.invalidate_calls == 1
+    assert gateway.disconnect_calls == 1
 
 
 async def test_relative_skip_not_replayed() -> None:
@@ -225,6 +256,7 @@ async def test_relative_skip_not_replayed() -> None:
     with pytest.raises(UncertainExecutionError):
         await controller.skip(SkipDirection.BACKWARD, 15)
     assert gateway.reconnect_calls == 0
+    assert gateway.disconnect_calls == 1
 
 
 async def test_relative_volume_not_replayed() -> None:
@@ -232,6 +264,8 @@ async def test_relative_volume_not_replayed() -> None:
     gateway.fail(DeviceConnectionError("lost", may_have_been_delivered=True), "volume_step")
     with pytest.raises(UncertainExecutionError):
         await controller.adjust_volume(VolumeDirection.UP, 1)
+    assert gateway.reconnect_calls == 0
+    assert gateway.disconnect_calls == 1
 
 
 async def test_idempotent_seek_is_retried() -> None:

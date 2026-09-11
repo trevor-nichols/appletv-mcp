@@ -43,11 +43,12 @@ class ConnectionManager(DeviceListener):
         self._connect_lock = asyncio.Lock()
         self._atv: AppleTV | None = None
         self._address: str | None = None
+        self._stale = False
         self._closed = False
 
     @property
     def cached(self) -> bool:
-        return self._atv is not None
+        return self._atv is not None and not self._stale
 
     @property
     def current_address(self) -> str | None:
@@ -56,8 +57,10 @@ class ConnectionManager(DeviceListener):
     async def get(self) -> AppleTV:
         async with self._connect_lock:
             self._ensure_open()
-            if self._atv is not None:
-                return self._atv
+            atv = self._atv
+            if atv is not None and not self._stale:
+                return atv
+            await self._close_cached()
             return await self._establish()
 
     async def reconnect(self) -> AppleTV:
@@ -67,8 +70,26 @@ class ConnectionManager(DeviceListener):
             return await self._establish()
 
     def invalidate(self) -> None:
-        self._atv = None
-        self._address = None
+        """Mark the cached session unusable without dropping ownership.
+
+        DeviceListener callbacks are synchronous, so this cannot close the
+        pyatv object. `reconnect()`, `disconnect()`, `get()`, and `close()`
+        close the retained handle under the connection lock.
+        """
+
+        if self._atv is not None:
+            self._stale = True
+
+    async def disconnect(self) -> None:
+        """Close the current session without establishing a new one."""
+
+        async with self._connect_lock:
+            await self._close_cached()
+
+    async def resolve_device(self) -> DiscoveredDevice:
+        """Discover the configured Apple TV using the production identity rules."""
+
+        return await self._discover(self._load_settings())
 
     async def close(self) -> None:
         async with self._connect_lock:
@@ -180,6 +201,7 @@ class ConnectionManager(DeviceListener):
         atv = self._atv
         self._atv = None
         self._address = None
+        self._stale = False
         if atv is None:
             return
         try:

@@ -19,6 +19,7 @@ class Runtime:
 
     async def aclose(self) -> None:
         await self.controller.close()
+        await self.connection_manager.close()
         await self.storage.close()
 
 

@@ -114,6 +114,12 @@ async def test_idempotent_and_relative_annotations() -> None:
     adjust = tools["apple_tv_adjust_volume"].annotations
     assert adjust is not None
     assert adjust.idempotent_hint is False
+    open_url = tools["apple_tv_open_url"].annotations
+    assert open_url is not None
+    assert open_url.idempotent_hint is False
+    open_app = tools["apple_tv_open_app"].annotations
+    assert open_app is not None
+    assert open_app.idempotent_hint is True
 
 
 async def test_enum_and_numeric_constraints() -> None:

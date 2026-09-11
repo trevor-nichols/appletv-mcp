@@ -23,7 +23,10 @@ from agenai_appletv_mcp.domain.models.capabilities import AppleTVCapabilities
 from agenai_appletv_mcp.domain.models.device import AppInfo
 from agenai_appletv_mcp.domain.models.status import AppleTVStatus
 from agenai_appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
-from agenai_appletv_mcp.infrastructure.pyatv.exception_map import translate_exception
+from agenai_appletv_mcp.infrastructure.pyatv.exception_map import (
+    is_optional_absence,
+    translate_exception,
+)
 from agenai_appletv_mcp.infrastructure.pyatv.feature_map import FEATURE_MAP
 from agenai_appletv_mcp.infrastructure.pyatv.normalizers import (
     connected_status,
@@ -79,6 +82,9 @@ class PyAtvGateway:
 
     def invalidate(self) -> None:
         self._connections.invalidate()
+
+    async def disconnect(self) -> None:
+        await self._connections.disconnect()
 
     async def reconnect(self) -> None:
         await self._connections.reconnect()
@@ -264,14 +270,18 @@ def _feature_availability(atv: AppleTV, feature: FeatureName) -> FeatureAvailabi
 def _optional_value[T](func: Callable[[], T]) -> T | None:
     try:
         return func()
-    except Exception:
-        logger.debug("Optional device property is unavailable", exc_info=True)
-        return None
+    except Exception as exc:
+        if is_optional_absence(exc):
+            logger.debug("Optional device property is unavailable", exc_info=True)
+            return None
+        raise
 
 
 async def _optional[T](awaitable: Awaitable[T]) -> T | None:
     try:
         return await awaitable
-    except Exception:
-        logger.debug("Optional device call failed", exc_info=True)
-        return None
+    except Exception as exc:
+        if is_optional_absence(exc):
+            logger.debug("Optional device call failed", exc_info=True)
+            return None
+        raise

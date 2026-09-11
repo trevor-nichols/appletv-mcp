@@ -423,6 +423,7 @@ Public interface:
 class ConnectionManager:
     async def get(self) -> AppleTV: ...
     async def reconnect(self) -> AppleTV: ...
+    async def disconnect(self) -> None: ...
     async def close(self) -> None: ...
     def invalidate(self) -> None: ...
 ```
@@ -443,6 +444,9 @@ get()
  │
  ├── healthy cached connection?
  │      └── return
+ │
+ ├── stale cached connection?
+ │      └── close the retained pyatv object
  │
  ├── preferred_host available?
  │      ├── unicast scan
@@ -487,6 +491,11 @@ A connection must be invalidated when:
 
 Invalidation must not delete persistent pairing credentials.
 
+`invalidate()` marks the cached session unusable but retains ownership of the
+`pyatv` object. `reconnect()`, `disconnect()`, a subsequent `get()`, and `close()`
+are responsible for calling `atv.close()`. Dropping the cached handle before
+close orphans a live protocol session.
+
 ---
 
 ## 10. Reconnection and Retry Policy
@@ -496,6 +505,11 @@ Read operations may:
 1. Detect a broken cached connection.
 2. Reconnect.
 3. Retry once.
+
+Transport, timeout, authentication, and connection errors during a status read
+must propagate as connection failures. Only genuine “this optional field is
+unavailable” exceptions (`NotSupportedError`, `InvalidStateError`) may be
+treated as absent metadata.
 
 Do not automatically replay a non-idempotent operation after an uncertain transport failure.
 
@@ -530,6 +544,7 @@ Do not replay automatically:
 - Previous/next.
 - Play/pause toggle.
 - Relative skips when execution is uncertain.
+- URL / deep-link launches.
 
 When a non-idempotent command fails after dispatch uncertainty, return a `ToolError` explaining that execution state is uncertain.
 
@@ -850,12 +865,26 @@ Do not claim that arbitrary applications support arbitrary deep links.
 
 A successful result means the launch request was accepted. It does not prove that a specific item is visible on screen.
 
+Deep links are not safely idempotent. Custom schemes can start playback or other
+side effects, so `apple_tv_open_url` must not be retried after uncertain delivery.
+Launching by resolved bundle ID via `apple_tv_open_app` remains an absolute
+application-state request and may stay idempotent.
+
 Output:
 
 ```python
 class OpenUrlResult(BaseModel):
     url: str
     accepted: bool
+```
+
+Tool annotations:
+
+```text
+read_only_hint = false
+destructive_hint = false
+idempotent_hint = false
+open_world_hint = false
 ```
 
 ---

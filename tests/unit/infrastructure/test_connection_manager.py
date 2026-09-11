@@ -115,10 +115,41 @@ async def test_invalidate_and_reconnect() -> None:
     manager = _manager(scanner, connected=created)
     first = await manager.get()
     manager.invalidate()
+    assert manager.cached is False
+    assert first.close_calls == 0
     second = await manager.reconnect()
     assert first is not second
     assert len(created) == 2
+    assert first.close_calls == 1
     await manager.close()
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+
+
+async def test_get_after_invalidate_closes_retained_connection() -> None:
+    scanner = FakeScanner([discovered()])
+    created: list[FakeAppleTV] = []
+    manager = _manager(scanner, connected=created)
+    first = await manager.get()
+    manager.invalidate()
+    second = await manager.get()
+    assert first is not second
+    assert first.close_calls == 1
+    await manager.close()
+
+
+async def test_disconnect_closes_retained_connection_without_reconnect() -> None:
+    scanner = FakeScanner([discovered()])
+    created: list[FakeAppleTV] = []
+    manager = _manager(scanner, connected=created)
+    first = await manager.get()
+    manager.invalidate()
+    await manager.disconnect()
+    assert first.close_calls == 1
+    assert len(created) == 1
+    assert manager.cached is False
+    await manager.close()
+    assert first.close_calls == 1
 
 
 async def test_close_is_idempotent() -> None:
@@ -139,4 +170,6 @@ async def test_listener_invalidates_on_loss() -> None:
     assert atv.listener is manager
     manager.connection_lost(RuntimeError("dropped"))
     assert manager.cached is False
+    assert atv.close_calls == 0
     await manager.close()
+    assert atv.close_calls == 1

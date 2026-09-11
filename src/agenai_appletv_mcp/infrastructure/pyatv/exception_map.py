@@ -32,6 +32,19 @@ _DISCONNECTED = (
 )
 _TIMEOUT = (pyatv_exceptions.OperationTimeoutError,)
 
+# Property/call failures that mean "this optional field is not available"
+# rather than "the connection or command transport failed".
+_OPTIONAL_ABSENCE = (
+    pyatv_exceptions.NotSupportedError,
+    pyatv_exceptions.InvalidStateError,
+)
+
+
+def is_optional_absence(exc: BaseException) -> bool:
+    """Return True when `exc` means an optional device field is unavailable."""
+
+    return isinstance(exc, _OPTIONAL_ABSENCE)
+
 
 def translate_exception(
     exc: Exception,

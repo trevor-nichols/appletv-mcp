@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from types import SimpleNamespace
 from typing import Any
+
+from pyatv.exceptions import NotSupportedError
 
 from agenai_appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from agenai_appletv_mcp.domain.enums import (
@@ -58,12 +61,55 @@ class FakeAppleTV:
     def __init__(self) -> None:
         self.listener: Any = None
         self.close_calls = 0
+        self.playing_error: Exception | None = None
+        self.metadata = _FakeMetadata(self)
+        self.audio = _FakeAudio()
+        self.keyboard = _FakeKeyboard()
+        self.power = _FakePower()
+        self.device_info = SimpleNamespace(
+            model_str="Apple TV 4K",
+            operating_system=SimpleNamespace(name="TvOS"),
+            version=None,
+            mac=None,
+        )
 
     def close(self) -> set[asyncio.Task[Any]]:
         self.close_calls += 1
         if self.listener is not None:
             self.listener.connection_closed()
         return set()
+
+
+class _FakeMetadata:
+    def __init__(self, owner: FakeAppleTV) -> None:
+        self._owner = owner
+
+    async def playing(self) -> object:
+        if self._owner.playing_error is not None:
+            raise self._owner.playing_error
+        raise NotSupportedError()
+
+    @property
+    def app(self) -> object:
+        raise NotSupportedError()
+
+
+class _FakeAudio:
+    @property
+    def volume(self) -> float:
+        raise NotSupportedError()
+
+
+class _FakeKeyboard:
+    @property
+    def text_focus_state(self) -> object:
+        raise NotSupportedError()
+
+
+class _FakePower:
+    @property
+    def power_state(self) -> object:
+        raise NotSupportedError()
 
 
 class FakeScanner:
@@ -116,6 +162,7 @@ class FakeGateway:
         self._call_counts: dict[str, int] = {}
         self.invalidate_calls = 0
         self.reconnect_calls = 0
+        self.disconnect_calls = 0
         self.closed = False
         self.launch_log: list[str] = []
         self.press_log: list[tuple[RemoteButton, PressAction]] = []
@@ -133,6 +180,9 @@ class FakeGateway:
 
     def invalidate(self) -> None:
         self.invalidate_calls += 1
+
+    async def disconnect(self) -> None:
+        self.disconnect_calls += 1
 
     async def reconnect(self) -> None:
         self.reconnect_calls += 1

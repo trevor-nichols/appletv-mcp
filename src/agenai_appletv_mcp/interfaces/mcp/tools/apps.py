@@ -66,7 +66,7 @@ def register_launch(mcp: MCPServer[AppContext]) -> None:
         annotations=ToolAnnotations(
             read_only_hint=False,
             destructive_hint=False,
-            idempotent_hint=True,
+            idempotent_hint=False,
             open_world_hint=False,
         ),
     )
@@ -83,7 +83,8 @@ def register_launch(mcp: MCPServer[AppContext]) -> None:
         """Ask the Apple TV to open a URL or application deep link.
 
         A successful result means the launch request was accepted. It does not prove
-        that a specific screen or item is visible.
+        that a specific screen or item is visible. Deep links are not retried after
+        uncertain delivery because they may start playback or other side effects.
         """
 
         return await run_tool(lambda: controller(ctx).open_url(url))

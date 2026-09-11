@@ -1,17 +1,23 @@
 """CLI configure/doctor/serve wiring tests without hardware."""
 
-import io
 from collections.abc import Sequence
+from io import StringIO
 from pathlib import Path
 
 import pytest
+from pyatv.interface import Storage
 
 from agenai_appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from agenai_appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from agenai_appletv_mcp.composition import Runtime
+from agenai_appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
 from agenai_appletv_mcp.infrastructure.config.repository import FileSettingsRepository
-from agenai_appletv_mcp.interfaces.cli.commands.configure import run_configure
+from agenai_appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
+from agenai_appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
+from agenai_appletv_mcp.interfaces.cli.commands.configure import ConfigureError, run_configure
 from agenai_appletv_mcp.interfaces.cli.commands.doctor import run_doctor
 from agenai_appletv_mcp.interfaces.cli.main import main
+from tests.helpers.factories import make_settings
 from tests.helpers.fakes import FakeGateway, discovered
 
 
@@ -19,8 +25,8 @@ async def test_configure_saves_selected_device(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = FileSettingsRepository(tmp_path / "config.json")
-    stdout = io.StringIO()
-    stdin = io.StringIO("1\n")
+    stdout = StringIO()
+    stdin = StringIO("1\n")
     device = discovered()
 
     async def fake_scan(
@@ -52,8 +58,7 @@ async def test_configure_saves_selected_device(
         fake_storage,
     )
 
-    gateway = FakeGateway()
-    controller = AppleTVController(gateway)
+    controller = AppleTVController(FakeGateway())
 
     class DummyRuntime:
         def __init__(self) -> None:
@@ -83,14 +88,98 @@ async def test_configure_saves_selected_device(
     assert "Capability summary" in stdout.getvalue()
 
 
+async def test_run_configure_translates_storage_error_and_closes_adapter(
+    tmp_path: Path,
+) -> None:
+    class FailingStorage(PyAtvStorageAdapter):
+        def __init__(self) -> None:
+            super().__init__(path=None)
+            self.close_calls = 0
+
+        async def load(self) -> Storage:
+            raise StorageError("Unable to load pyatv pairing storage.")
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            await super().close()
+
+    adapter = FailingStorage()
+    with pytest.raises(ConfigureError, match="Unable to load pyatv pairing storage"):
+        await run_configure(
+            stdin=StringIO(),
+            stdout=StringIO(),
+            settings_repository=FileSettingsRepository(tmp_path / "config.json"),
+            storage=adapter,
+        )
+    assert adapter.close_calls == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_main_configure_rejects_invalid_scan_timeout(value: str) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["configure", "--scan-timeout", value])
+    assert exc_info.value.code == 2
+
+
 async def test_doctor_fails_without_config(tmp_path: Path) -> None:
-    stdout = io.StringIO()
+    stdout = StringIO()
     code = await run_doctor(
         stdout=stdout,
         settings_repository=FileSettingsRepository(tmp_path / "missing.json"),
     )
     assert code == 1
     assert "FAIL Configuration" in stdout.getvalue()
+
+
+async def test_run_doctor_uses_preferred_host_when_multicast_fails(tmp_path: Path) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    repo.save(make_settings())
+    device = discovered()
+    calls: list[dict[str, object]] = []
+
+    class HostThenBrokenMulticast:
+        async def scan(
+            self,
+            *,
+            timeout: float,
+            identifier: str | None = None,
+            hosts: Sequence[str] | None = None,
+        ) -> list[DiscoveredDevice]:
+            calls.append({"identifier": identifier, "hosts": list(hosts or [])})
+            if hosts is None:
+                raise DeviceUnreachableError("multicast unavailable")
+            return [device]
+
+    scanner = HostThenBrokenMulticast()
+    manager = ConnectionManager(
+        settings_repository=repo,
+        storage=None,
+        scan=scanner.scan,
+    )
+    storage = PyAtvStorageAdapter(tmp_path / "pyatv.conf")
+    runtime = Runtime(
+        settings_repository=repo,
+        storage=storage,
+        connection_manager=manager,
+        controller=AppleTVController(FakeGateway()),
+    )
+
+    async def factory() -> Runtime:
+        return runtime
+
+    stdout = StringIO()
+    code = await run_doctor(
+        stdout=stdout,
+        settings_repository=repo,
+        storage=storage,
+        runtime_factory=factory,
+    )
+    output = stdout.getvalue()
+    assert code == 0
+    assert "OK Device discovery" in output
+    assert "OK Connection" in output
+    assert {"identifier": None, "hosts": ["192.168.1.50"]} in calls
+    assert all(call["hosts"] for call in calls)
 
 
 def test_cli_help_and_unknown() -> None:

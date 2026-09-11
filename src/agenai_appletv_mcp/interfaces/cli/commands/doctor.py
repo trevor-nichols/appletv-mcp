@@ -9,7 +9,6 @@ from agenai_appletv_mcp.domain.enums import FeatureAvailability, NormalizedOpera
 from agenai_appletv_mcp.domain.errors import AppleTVError
 from agenai_appletv_mcp.domain.models.capabilities import AppleTVCapabilities
 from agenai_appletv_mcp.infrastructure.config.repository import FileSettingsRepository
-from agenai_appletv_mcp.infrastructure.pyatv.discovery import PyAtvScanner
 from agenai_appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
 from agenai_appletv_mcp.interfaces.cli.rendering import CheckResult
 
@@ -21,14 +20,13 @@ async def run_doctor(
     stdout: TextIO,
     settings_repository: FileSettingsRepository | None = None,
     storage: PyAtvStorageAdapter | None = None,
-    scanner: PyAtvScanner | None = None,
     runtime_factory: RuntimeFactory | None = None,
 ) -> int:
     checks: list[CheckResult] = []
     repository = settings_repository or FileSettingsRepository()
     storage_adapter = storage or PyAtvStorageAdapter()
+    runtime: Runtime | None = None
 
-    settings = None
     try:
         settings = repository.load()
         checks.append(CheckResult("Configuration", True, f"loaded from {repository.path}"))
@@ -38,90 +36,34 @@ async def run_doctor(
         return 1
 
     try:
-        pyatv_storage = await storage_adapter.load()
+        await storage_adapter.load()
         checks.append(CheckResult("pyatv storage", True, "loaded"))
     except AppleTVError as exc:
         checks.append(CheckResult("pyatv storage", False, exc.message))
         _write_checks(stdout, checks)
         return 1
 
-    scanner = scanner or PyAtvScanner(pyatv_storage)
-    discovered: DiscoveredDevice | None = None
-    try:
-        devices = await scanner.scan(
-            timeout=settings.scan_timeout_seconds,
-            identifier=settings.device_identifier,
-        )
-        for device in devices:
-            if device.matches(settings.device_identifier):
-                discovered = device
-                break
-        if discovered is None:
-            checks.append(
-                CheckResult(
-                    "Device discovery",
-                    False,
-                    f"identifier {settings.device_identifier} was not found",
-                )
-            )
-        else:
-            checks.append(
-                CheckResult(
-                    "Device discovery",
-                    True,
-                    f"{discovered.name} at {discovered.address}",
-                )
-            )
-            matched = discovered.matches(settings.device_identifier)
-            checks.append(
-                CheckResult(
-                    "Stable identifier",
-                    matched,
-                    "matched" if matched else "mismatch",
-                )
-            )
-            if settings.preferred_host is None:
-                checks.append(
-                    CheckResult(
-                        "Preferred host",
-                        True,
-                        f"unset; discovered {discovered.address}",
-                        required=False,
-                    )
-                )
-            elif discovered.address == settings.preferred_host:
-                checks.append(CheckResult("Preferred host", True, settings.preferred_host))
-            else:
-                checks.append(
-                    CheckResult(
-                        "Preferred host",
-                        True,
-                        f"configured {settings.preferred_host}, currently {discovered.address}",
-                        required=False,
-                    )
-                )
-    except AppleTVError as exc:
-        checks.append(CheckResult("Device discovery", False, exc.message))
-
     factory = runtime_factory or (
         lambda: create_runtime(settings_repository=repository, storage=storage_adapter)
     )
-    runtime = await factory()
     try:
+        runtime = await factory()
+        try:
+            device = await runtime.connection_manager.resolve_device()
+            checks.extend(
+                _discovery_checks(device, settings.device_identifier, settings.preferred_host)
+            )
+        except AppleTVError as exc:
+            checks.append(CheckResult("Device discovery", False, exc.message))
+
         try:
             status = await runtime.controller.status()
             connected = status.connection.value == "connected"
-            checks.append(
-                CheckResult(
-                    "Connection",
-                    connected,
-                    status.connection.value,
-                )
-            )
+            checks.append(CheckResult("Connection", connected, status.connection.value))
         except AppleTVError as exc:
             checks.append(CheckResult("Connection", False, exc.message))
             _write_checks(stdout, checks)
-            return 1
+            return 1 if any(not check.ok and check.required for check in checks) else 0
 
         try:
             capabilities = await runtime.controller.capabilities()
@@ -129,10 +71,49 @@ async def run_doctor(
         except AppleTVError as exc:
             checks.append(CheckResult("Capabilities", False, exc.message, required=False))
     finally:
-        await runtime.aclose()
+        if runtime is not None:
+            await runtime.aclose()
+        else:
+            await storage_adapter.close()
 
     _write_checks(stdout, checks)
     return 1 if any(not check.ok and check.required for check in checks) else 0
+
+
+def _discovery_checks(
+    device: DiscoveredDevice,
+    identifier: str,
+    preferred_host: str | None,
+) -> list[CheckResult]:
+    checks = [
+        CheckResult("Device discovery", True, f"{device.name} at {device.address}"),
+        CheckResult(
+            "Stable identifier",
+            device.matches(identifier),
+            "matched" if device.matches(identifier) else "mismatch",
+        ),
+    ]
+    if preferred_host is None:
+        checks.append(
+            CheckResult(
+                "Preferred host",
+                True,
+                f"unset; discovered {device.address}",
+                required=False,
+            )
+        )
+    elif device.address == preferred_host:
+        checks.append(CheckResult("Preferred host", True, preferred_host))
+    else:
+        checks.append(
+            CheckResult(
+                "Preferred host",
+                True,
+                f"configured {preferred_host}, currently {device.address}",
+                required=False,
+            )
+        )
+    return checks
 
 
 def _capability_checks(capabilities: AppleTVCapabilities) -> list[CheckResult]:
