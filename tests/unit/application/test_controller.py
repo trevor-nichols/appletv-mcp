@@ -13,6 +13,7 @@ from appletv_mcp.domain.enums import (
     KeyboardFocus,
     NormalizedOperation,
     PlaybackAction,
+    PowerState,
     PowerTarget,
     PressAction,
     RemoteButton,
@@ -27,6 +28,7 @@ from appletv_mcp.domain.errors import (
     FeatureUnsupportedError,
     InvalidUrlError,
     KeyboardNotFocusedError,
+    PairingRequiredError,
     UncertainExecutionError,
 )
 from tests.helpers.factories import make_app, make_status
@@ -97,6 +99,30 @@ async def test_power_on_and_off() -> None:
     assert on.power_state.value == "on"
     assert off.power_state.value == "off"
     assert ("turn_on", None) in gateway.calls
+
+
+async def test_power_reports_unknown_when_observed_state_does_not_match() -> None:
+    controller, gateway = _controller()
+    gateway.observed_power = PowerState.UNKNOWN
+    result = await controller.power(PowerTarget.ON)
+    assert result.requested_state is PowerTarget.ON
+    assert result.power_state is PowerState.UNKNOWN
+    assert gateway.reconnect_calls == 0
+
+
+async def test_reconnect_propagates_pairing_required() -> None:
+    gateway = FakeGateway()
+    gateway.fail(DeviceConnectionError("drop", may_have_been_delivered=False), "capabilities")
+
+    async def reconnect() -> None:
+        gateway.reconnect_calls += 1
+        raise PairingRequiredError("Apple TV pairing credentials are missing or invalid.")
+
+    gateway.reconnect = reconnect  # type: ignore[method-assign]
+    controller, _ = _controller(gateway)
+    with pytest.raises(PairingRequiredError, match="pairing credentials"):
+        await controller.capabilities()
+    assert gateway.reconnect_calls == 1
 
 
 async def test_open_app_bundle_id_and_name() -> None:

@@ -76,3 +76,11 @@ def test_preferred_host_update(tmp_path: Path) -> None:
     assert updated.preferred_host == "10.0.0.9"
     assert repo.load().device_identifier == updated.device_identifier
     assert repo.load().preferred_host == "10.0.0.9"
+
+
+def test_preferred_host_update_rejects_invalid_host(tmp_path: Path) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    repo.save(make_settings(preferred_host="192.168.1.50"))
+    with pytest.raises(ConfigurationError, match="preferred_host"):
+        repo.update_preferred_host("living-room.local")
+    assert repo.load().preferred_host == "192.168.1.50"

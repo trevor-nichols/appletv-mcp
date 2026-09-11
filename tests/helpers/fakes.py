@@ -7,7 +7,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from types import SimpleNamespace
 from typing import Any
 
+from pyatv.const import FeatureState
+from pyatv.const import PowerState as PyatvPowerState
 from pyatv.exceptions import NotSupportedError
+from pyatv.interface import FeatureInfo
 
 from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from appletv_mcp.domain.enums import (
@@ -62,10 +65,16 @@ class FakeAppleTV:
         self.listener: Any = None
         self.close_calls = 0
         self.playing_error: Exception | None = None
+        self.feature_error: Exception | None = None
+        self.command_error: Exception | None = None
+        self.power_observe_error: Exception | None = None
         self.metadata = _FakeMetadata(self)
         self.audio = _FakeAudio()
         self.keyboard = _FakeKeyboard()
-        self.power = _FakePower()
+        self.power = _FakePower(self)
+        self.features = _FakeFeatures(self)
+        self.remote_control = _FakeRemoteControl(self)
+        self.apps = _FakeApps(self)
         self.device_info = SimpleNamespace(
             model_str="Apple TV 4K",
             operating_system=SimpleNamespace(name="TvOS"),
@@ -107,9 +116,80 @@ class _FakeKeyboard:
 
 
 class _FakePower:
+    def __init__(self, owner: FakeAppleTV) -> None:
+        self._owner = owner
+        self._state: PyatvPowerState | None = None
+        self.turn_on_calls: list[bool] = []
+        self.turn_off_calls: list[bool] = []
+
     @property
-    def power_state(self) -> object:
-        raise NotSupportedError()
+    def power_state(self) -> PyatvPowerState:
+        if self._owner.power_observe_error is not None:
+            raise self._owner.power_observe_error
+        if self._state is None:
+            raise NotSupportedError()
+        return self._state
+
+    def set_state(self, state: PyatvPowerState) -> None:
+        self._state = state
+
+    async def turn_on(self, await_new_state: bool = False) -> None:
+        self.turn_on_calls.append(await_new_state)
+        if await_new_state:
+            raise NotImplementedError("not supported by Companion yet")
+        if self._owner.command_error is not None:
+            raise self._owner.command_error
+        if self._state is not None:
+            self._state = PyatvPowerState.On
+
+    async def turn_off(self, await_new_state: bool = False) -> None:
+        self.turn_off_calls.append(await_new_state)
+        if await_new_state:
+            raise NotImplementedError("not supported by Companion yet")
+        if self._owner.command_error is not None:
+            raise self._owner.command_error
+        if self._state is not None:
+            self._state = PyatvPowerState.Off
+
+
+class _FakeFeatures:
+    def __init__(self, owner: FakeAppleTV) -> None:
+        self._owner = owner
+
+    def get_feature(self, _feature_name: object) -> FeatureInfo:
+        if self._owner.feature_error is not None:
+            raise self._owner.feature_error
+        return FeatureInfo(FeatureState.Available)
+
+
+class _FakeRemoteControl:
+    def __init__(self, owner: FakeAppleTV) -> None:
+        self._owner = owner
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str) -> Callable[..., Awaitable[None]]:
+        async def _call(*_args: object, **_kwargs: object) -> None:
+            self.calls.append(name)
+            if self._owner.command_error is not None:
+                raise self._owner.command_error
+
+        return _call
+
+
+class _FakeApps:
+    def __init__(self, owner: FakeAppleTV) -> None:
+        self._owner = owner
+        self.launch_log: list[str] = []
+
+    async def app_list(self) -> list[object]:
+        if self._owner.feature_error is not None:
+            raise self._owner.feature_error
+        return []
+
+    async def launch_app(self, bundle_id_or_url: str) -> None:
+        if self._owner.command_error is not None:
+            raise self._owner.command_error
+        self.launch_log.append(bundle_id_or_url)
 
 
 class FakeScanner:
@@ -154,6 +234,7 @@ class FakeGateway:
             NormalizedOperation, FeatureAvailability.AVAILABLE
         )
         self.power_state = PowerState.ON
+        self.observed_power: PowerState | None = None
         self.volume: float | None = 20.0
         self.calls: list[tuple[str, object]] = []
         self.fail_with: Exception | None = None
@@ -208,13 +289,17 @@ class FakeGateway:
         self._before("feature_state")
         return self.features[operation]
 
-    async def turn_on(self, *, await_new_state: bool) -> PowerState:
+    async def turn_on(self) -> PowerState:
         self._before("turn_on")
+        if self.observed_power is not None:
+            return self.observed_power
         self.power_state = PowerState.ON
         return self.power_state
 
-    async def turn_off(self, *, await_new_state: bool) -> PowerState:
+    async def turn_off(self) -> PowerState:
         self._before("turn_off")
+        if self.observed_power is not None:
+            return self.observed_power
         self.power_state = PowerState.OFF
         return self.power_state
 
@@ -279,13 +364,16 @@ def discovered(
     name: str = "Living Room",
     address: str = "192.168.1.50",
     extras: Sequence[str] = (),
+    device_model: str | None = "Gen4K",
+    model: str | None = "Apple TV 4K",
 ) -> DiscoveredDevice:
     return DiscoveredDevice(
         identifier=identifier,
         all_identifiers=(identifier, *extras),
         name=name,
         address=address,
-        model="Apple TV 4K",
+        model=model,
+        device_model=device_model,
         config=object(),
     )
 

@@ -5,11 +5,13 @@ from pyatv import exceptions as pyatv_exceptions
 from appletv_mcp.domain.errors import (
     CommandFailedError,
     CommandTimeoutError,
+    ConfigurationError,
     DeviceConnectionError,
     DeviceUnreachableError,
     FeatureUnavailableError,
     FeatureUnsupportedError,
     PairingRequiredError,
+    StorageError,
 )
 
 _PAIRING = (
@@ -26,10 +28,7 @@ _UNREACHABLE = (
     pyatv_exceptions.NoServiceError,
     pyatv_exceptions.DeviceIdMissingError,
 )
-_DISCONNECTED = (
-    pyatv_exceptions.ConnectionLostError,
-    pyatv_exceptions.BlockedStateError,
-)
+_DISCONNECTED = (pyatv_exceptions.ConnectionLostError,)
 _TIMEOUT = (pyatv_exceptions.OperationTimeoutError,)
 
 # Property/call failures that mean "this optional field is not available"
@@ -78,11 +77,28 @@ def translate_exception(
             f"Apple TV could not be reached while performing {operation}.",
             may_have_been_delivered=False,
         )
+    if isinstance(exc, pyatv_exceptions.BlockedStateError):
+        return DeviceConnectionError(
+            f"The Apple TV connection is closed and cannot perform {operation}.",
+            may_have_been_delivered=False,
+        )
     if isinstance(exc, _DISCONNECTED):
         return DeviceConnectionError(
             f"The Apple TV connection failed while performing {operation}.",
             may_have_been_delivered=may_have_been_delivered,
         )
+    if isinstance(exc, pyatv_exceptions.BackOffError):
+        return CommandFailedError("Apple TV requested a backoff period; retry later.")
+    if isinstance(exc, pyatv_exceptions.InvalidResponseError):
+        return CommandFailedError(
+            f"The Apple TV returned an invalid response during {operation}."
+        )
+    if isinstance(exc, pyatv_exceptions.InvalidConfigError):
+        return ConfigurationError(
+            f"Apple TV protocol configuration is invalid while performing {operation}."
+        )
+    if isinstance(exc, pyatv_exceptions.SettingsError):
+        return StorageError("pyatv storage or settings could not be used.")
     if isinstance(exc, pyatv_exceptions.CommandError):
         return CommandFailedError(f"The Apple TV rejected the {operation} command.")
     if isinstance(exc, pyatv_exceptions.ProtocolError):

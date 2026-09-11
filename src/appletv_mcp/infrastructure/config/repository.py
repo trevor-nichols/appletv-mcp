@@ -66,7 +66,12 @@ class FileSettingsRepository:
 
     def update_preferred_host(self, host: str) -> Settings:
         settings = self.load()
-        updated = settings.model_copy(update={"preferred_host": host})
+        payload = settings.model_dump()
+        payload["preferred_host"] = host
+        try:
+            updated = Settings.model_validate(payload)
+        except ValidationError as exc:
+            raise ConfigurationError(_validation_message(exc, self._path)) from exc
         self.save(updated)
         return updated
 

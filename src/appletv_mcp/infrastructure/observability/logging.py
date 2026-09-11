@@ -3,7 +3,7 @@
 import logging
 import sys
 
-from appletv_mcp.infrastructure.observability.redaction import RedactionFilter
+from appletv_mcp.infrastructure.observability.redaction import RedactingFormatter, RedactionFilter
 
 _APP_LOGGER = "appletv_mcp"
 _PYATV_LOGGER = "pyatv"
@@ -22,7 +22,7 @@ def configure_logging(*, debug: bool = False) -> None:
     root = logging.getLogger()
     if not _LoggingState.installed:
         handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         handler.addFilter(RedactionFilter())
         root.handlers.clear()
         root.addHandler(handler)

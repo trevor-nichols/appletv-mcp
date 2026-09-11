@@ -50,8 +50,8 @@ Before modifying code, inspect the repository and read the project documentation
 At minimum, read:
 
 ```text
-docs/SPEC.md
-docs/IMPLEMENTATION_CHECKLIST.md
+docs/apple-tv-mcp-spec/SPEC.md
+docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md
 ```
 
 Also inspect the pinned reference corpus under:
@@ -78,9 +78,9 @@ If file paths differ slightly, locate the actual files rather than assuming they
 
 When sources disagree, use this precedence:
 
-1. `docs/SPEC.md` — product behavior, architecture intent, and public contracts.
+1. `docs/apple-tv-mcp-spec/SPEC.md` — product behavior, architecture intent, and public contracts.
 2. `AGENTS.md` — repository-wide implementation rules.
-3. `docs/IMPLEMENTATION_CHECKLIST.md` — build order and completeness tracking.
+3. `docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md` — build order and completeness tracking.
 4. Pinned `pyatv 0.18.0` references — exact `pyatv` APIs and behavior.
 5. Pinned MCP Python SDK 2.2.0 references — exact SDK APIs and behavior.
 6. MCP 2026-07-28 specification — protocol semantics.
@@ -1286,7 +1286,7 @@ Do not imply screen visibility or foreground-app knowledge.
 
 ## 36. Checklist Discipline
 
-`docs/IMPLEMENTATION_CHECKLIST.md` is a living project tracker.
+`docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md` is a living project tracker.
 
 As work is genuinely completed:
 
@@ -1419,7 +1419,7 @@ If not, say the live-device checks remain unexecuted.
 
 ### Deviations
 
-List any deliberate deviation from `docs/SPEC.md`.
+List any deliberate deviation from `docs/apple-tv-mcp-spec/SPEC.md`.
 
 ### Remaining work
 

@@ -9,6 +9,7 @@ from pyatv.interface import BaseConfig, Storage
 
 from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from appletv_mcp.domain.errors import CommandTimeoutError, DeviceUnreachableError
+from appletv_mcp.infrastructure.pyatv.device_models import device_model_name
 from appletv_mcp.infrastructure.pyatv.exception_map import translate_exception
 
 logger = logging.getLogger(__name__)
@@ -50,17 +51,19 @@ class PyAtvScanner:
                 ) from exc
             raise mapped from exc
         devices = [_to_discovered(config) for config in configs if config.identifier]
-        logger.info("Discovered %d Apple TV candidate(s)", len(devices))
+        logger.info("Discovered %d device candidate(s)", len(devices))
         return devices
 
 
 def _to_discovered(config: BaseConfig) -> DiscoveredDevice:
     identifier = config.identifier or ""
+    info = config.device_info
     return DiscoveredDevice(
         identifier=identifier,
         all_identifiers=tuple(config.all_identifiers),
         name=config.name,
         address=str(config.address),
-        model=config.device_info.model_str,
+        model=info.model_str,
+        device_model=device_model_name(info),
         config=config,
     )

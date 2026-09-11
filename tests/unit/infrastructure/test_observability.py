@@ -6,6 +6,7 @@ import pytest
 from pyatv import exceptions as pyatv_exceptions
 
 from appletv_mcp.domain.errors import (
+    CommandFailedError,
     DeviceConnectionError,
     FeatureUnsupportedError,
     PairingRequiredError,
@@ -35,6 +36,19 @@ def test_redaction_filter_on_logger(caplog: pytest.LogCaptureFixture) -> None:
     assert "[redacted]" in caplog.text
 
 
+def test_redaction_filter_on_exception_message(caplog: pytest.LogCaptureFixture) -> None:
+    logger = logging.getLogger("appletv_mcp.tests.redaction_exc")
+    logger.addFilter(RedactionFilter())
+    secret = "b" * 40
+    with caplog.at_level(logging.ERROR, logger="appletv_mcp.tests.redaction_exc"):
+        try:
+            raise RuntimeError(f"credentials={secret}")
+        except RuntimeError:
+            logger.exception("command failed")
+    assert secret not in caplog.text
+    assert "[redacted]" in caplog.text
+
+
 def test_translate_pairing_and_unsupported() -> None:
     pairing = translate_exception(
         pyatv_exceptions.NoCredentialsError("missing"),
@@ -57,6 +71,29 @@ def test_translate_pairing_and_unsupported() -> None:
     assert isinstance(lost, DeviceConnectionError)
     assert lost.may_have_been_delivered is True
     assert "credentials" not in str(pairing).lower() or "pairing" in str(pairing).lower()
+
+
+def test_translate_backoff_and_blocked_state() -> None:
+    backoff = translate_exception(
+        pyatv_exceptions.BackOffError("wait"),
+        operation="connect",
+        may_have_been_delivered=True,
+    )
+    assert isinstance(backoff, CommandFailedError)
+    assert "backoff" in str(backoff).lower()
+    blocked = translate_exception(
+        pyatv_exceptions.BlockedStateError("closed"),
+        operation="right button",
+        may_have_been_delivered=True,
+    )
+    assert isinstance(blocked, DeviceConnectionError)
+    assert blocked.may_have_been_delivered is False
+    invalid = translate_exception(
+        pyatv_exceptions.InvalidResponseError("junk"),
+        operation="status",
+        may_have_been_delivered=False,
+    )
+    assert isinstance(invalid, CommandFailedError)
 
 
 def test_optional_absence_excludes_transport_errors() -> None:

@@ -28,6 +28,7 @@ class DiscoveredDevice:
     name: str
     address: str
     model: str | None = None
+    device_model: str | None = None
     config: object | None = None
 
     def matches(self, identifier: str) -> bool:
@@ -59,9 +60,9 @@ class AppleTVGateway(Protocol):
 
     async def feature_state(self, operation: NormalizedOperation) -> FeatureAvailability: ...
 
-    async def turn_on(self, *, await_new_state: bool) -> PowerState: ...
+    async def turn_on(self) -> PowerState: ...
 
-    async def turn_off(self, *, await_new_state: bool) -> PowerState: ...
+    async def turn_off(self) -> PowerState: ...
 
     async def current_power_state(self) -> PowerState: ...
 

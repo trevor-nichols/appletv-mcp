@@ -94,9 +94,8 @@ class PyAtvGateway:
         return unreachable_status(identifier=identifier, name=name, address=address)
 
     async def read_status(self) -> AppleTVStatus:
-        identifier, name, address = self._identity()
-
         async def _read(atv: AppleTV) -> AppleTVStatus:
+            identifier, name, address = self._identity()
             playing = await _optional(atv.metadata.playing())
             media_app = _optional_value(lambda: atv.metadata.app)
             volume = _optional_value(lambda: atv.audio.volume)
@@ -106,7 +105,7 @@ class PyAtvGateway:
                 atv,
                 identifier=identifier,
                 name=name or atv.device_info.model_str,
-                address=address or self._connections.current_address,
+                address=self._connections.current_address or address,
                 playing=playing,
                 media_app=media_app,
                 volume=volume,
@@ -114,7 +113,7 @@ class PyAtvGateway:
                 power_state=power,
             )
 
-        return await self._run("status", _read)
+        return await self._observe("status", _read)
 
     async def read_capabilities(self) -> AppleTVCapabilities:
         states: dict[str, FeatureAvailability] = {}
@@ -124,14 +123,14 @@ class PyAtvGateway:
                 states[operation.value] = _feature_availability(atv, feature)
             return AppleTVCapabilities.model_validate(states)
 
-        return await self._run("capabilities", _read)
+        return await self._observe("capabilities", _read)
 
     async def read_apps(self) -> list[AppInfo]:
         async def _read(atv: AppleTV) -> list[AppInfo]:
             apps = await atv.apps.app_list()
             return [info for app in apps if (info := normalize_app(app)) is not None]
 
-        return await self._run("list apps", _read)
+        return await self._observe("list apps", _read)
 
     async def feature_state(self, operation: NormalizedOperation) -> FeatureAvailability:
         feature = FEATURE_MAP[operation]
@@ -139,33 +138,36 @@ class PyAtvGateway:
         async def _read(atv: AppleTV) -> FeatureAvailability:
             return _feature_availability(atv, feature)
 
-        return await self._run(f"feature {operation.value}", _read)
+        return await self._observe(f"feature {operation.value}", _read)
 
-    async def turn_on(self, *, await_new_state: bool) -> PowerState:
+    async def turn_on(self) -> PowerState:
         async def _call(atv: AppleTV) -> PowerState:
-            await atv.power.turn_on(await_new_state=await_new_state)
-            return normalize_power_state(atv.power.power_state)
+            # Companion (pyatv 0.18.0's preferred power protocol) raises
+            # NotImplementedError when await_new_state=True, even though TurnOn
+            # is advertised as available. Dispatch without waiting, then snapshot.
+            await atv.power.turn_on(await_new_state=False)
+            return self._best_effort_power_state(atv)
 
-        return await self._run("power on", _call)
+        return await self._command("power on", _call)
 
-    async def turn_off(self, *, await_new_state: bool) -> PowerState:
+    async def turn_off(self) -> PowerState:
         async def _call(atv: AppleTV) -> PowerState:
-            await atv.power.turn_off(await_new_state=await_new_state)
-            return normalize_power_state(atv.power.power_state)
+            await atv.power.turn_off(await_new_state=False)
+            return self._best_effort_power_state(atv)
 
-        return await self._run("power off", _call)
+        return await self._command("power off", _call)
 
     async def current_power_state(self) -> PowerState:
         async def _read(atv: AppleTV) -> PowerState:
             return normalize_power_state(atv.power.power_state)
 
-        return await self._run("power state", _read)
+        return await self._observe("power state", _read)
 
     async def launch_app(self, bundle_id_or_url: str) -> None:
         async def _call(atv: AppleTV) -> None:
             await atv.apps.launch_app(bundle_id_or_url)
 
-        await self._run("launch app", _call)
+        await self._command("launch app", _call)
 
     async def press(self, button: RemoteButton, action: PressAction) -> None:
         input_action = _INPUT_ACTION[action]
@@ -175,7 +177,7 @@ class PyAtvGateway:
             method = getattr(atv.remote_control, method_name)
             await method(input_action)
 
-        await self._run(f"{button.value} button", _call)
+        await self._command(f"{button.value} button", _call)
 
     async def playback(self, action: PlaybackAction) -> None:
         method_name = _PLAYBACK_METHOD[action]
@@ -184,13 +186,13 @@ class PyAtvGateway:
             method = getattr(atv.remote_control, method_name)
             await method()
 
-        await self._run(f"playback {action.value}", _call)
+        await self._command(f"playback {action.value}", _call)
 
     async def seek(self, position_seconds: int) -> None:
         async def _call(atv: AppleTV) -> None:
             await atv.remote_control.set_position(position_seconds)
 
-        await self._run("seek", _call)
+        await self._command("seek", _call)
 
     async def skip(self, direction: SkipDirection, seconds: float) -> None:
         interval = seconds if seconds > 0 else 0.0
@@ -201,21 +203,21 @@ class PyAtvGateway:
             else:
                 await atv.remote_control.skip_backward(interval)
 
-        await self._run(f"skip {direction.value}", _call)
+        await self._command(f"skip {direction.value}", _call)
 
     async def set_text(self, text: str) -> None:
         async def _call(atv: AppleTV) -> None:
             await atv.keyboard.text_set(text)
 
         logger.debug("Sending %d characters to Apple TV keyboard", len(text))
-        await self._run("set text", _call)
+        await self._command("set text", _call)
 
     async def set_volume(self, percent: float) -> float | None:
         async def _call(atv: AppleTV) -> float | None:
             await atv.audio.set_volume(percent)
             return _optional_value(lambda: atv.audio.volume)
 
-        return await self._run("set volume", _call)
+        return await self._command("set volume", _call)
 
     async def volume_step(self, direction: VolumeDirection) -> None:
         async def _call(atv: AppleTV) -> None:
@@ -224,20 +226,46 @@ class PyAtvGateway:
             else:
                 await atv.audio.volume_down()
 
-        await self._run(f"volume {direction.value}", _call)
+        await self._command(f"volume {direction.value}", _call)
 
     async def current_volume(self) -> float | None:
         async def _read(atv: AppleTV) -> float | None:
             return _optional_value(lambda: atv.audio.volume)
 
-        return await self._run("volume", _read)
+        return await self._observe("volume", _read)
 
-    async def _run[T](self, operation: str, func: Callable[[AppleTV], Awaitable[T]]) -> T:
+    def _best_effort_power_state(self, atv: AppleTV) -> PowerState:
+        """Read power_state without failing a command that already executed.
+
+        Do not reconnect here: a post-shutdown connect/wake can undo turn-off.
+        """
+
+        try:
+            return normalize_power_state(atv.power.power_state)
+        except Exception as exc:
+            logger.debug("Power state could not be observed after command", exc_info=True)
+            if not is_optional_absence(exc):
+                self.invalidate()
+            return PowerState.UNKNOWN
+
+    async def _observe[T](self, operation: str, func: Callable[[AppleTV], Awaitable[T]]) -> T:
+        return await self._run(operation, func, delivery_risk=False)
+
+    async def _command[T](self, operation: str, func: Callable[[AppleTV], Awaitable[T]]) -> T:
+        return await self._run(operation, func, delivery_risk=True)
+
+    async def _run[T](
+        self,
+        operation: str,
+        func: Callable[[AppleTV], Awaitable[T]],
+        *,
+        delivery_risk: bool,
+    ) -> T:
         delivered = False
         try:
             atv = await self._connections.get()
             async with asyncio.timeout(self._timeout):
-                delivered = True
+                delivered = delivery_risk
                 return await func(atv)
         except AppleTVError:
             raise

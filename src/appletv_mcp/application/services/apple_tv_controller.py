@@ -15,6 +15,7 @@ from appletv_mcp.domain.enums import (
     NormalizedOperation,
     OperationKind,
     PlaybackAction,
+    PowerState,
     PowerTarget,
     PressAction,
     RemoteButton,
@@ -112,10 +113,13 @@ class AppleTVController:
         async def _power() -> PowerResult:
             await self._require(operation)
             if state is PowerTarget.ON:
-                observed = await self._gateway.turn_on(await_new_state=True)
+                observed = await self._gateway.turn_on()
             else:
-                observed = await self._gateway.turn_off(await_new_state=True)
-            return PowerResult(requested_state=state, power_state=observed)
+                observed = await self._gateway.turn_off()
+            return PowerResult(
+                requested_state=state,
+                power_state=_confirmed_power_state(state, observed),
+            )
 
         return await self._write(OperationKind.IDEMPOTENT_WRITE, f"power {state.value}", _power)
 
@@ -275,6 +279,16 @@ class AppleTVController:
     ) -> T:
         async with self._command_lock:
             return await execute_with_retry(self._gateway, kind, label, action)
+
+
+def _confirmed_power_state(requested: PowerTarget, observed: PowerState) -> PowerState:
+    """Return observed state only when it matches the request; otherwise unknown."""
+
+    if requested is PowerTarget.ON and observed is PowerState.ON:
+        return PowerState.ON
+    if requested is PowerTarget.OFF and observed is PowerState.OFF:
+        return PowerState.OFF
+    return PowerState.UNKNOWN
 
 
 def validate_deep_link(url: str) -> str:

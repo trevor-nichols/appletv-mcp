@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from appletv_mcp.application.ports.apple_tv import AppleTVGateway
 from appletv_mcp.domain.enums import OperationKind
 from appletv_mcp.domain.errors import (
+    AppleTVError,
     CommandTimeoutError,
     DeviceConnectionError,
     DeviceUnreachableError,
@@ -51,6 +52,8 @@ async def _recover[T](
     logger.info("Reconnecting after %s failed: %s", operation_label, exc.message)
     try:
         await gateway.reconnect()
+    except AppleTVError:
+        raise
     except Exception as reconnect_error:
         raise exc from reconnect_error
 

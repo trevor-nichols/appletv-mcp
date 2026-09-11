@@ -351,14 +351,16 @@ appletv-mcp configure
 
 1. Load `pyatv` persistent storage.
 2. Scan Apple TVs.
-3. Show discovered devices that can be used with stored credentials.
-4. Allow the user to select the target Apple TV.
-5. Save its stable identifier.
-6. Save its display name for diagnostics.
-7. Save its current host as `preferred_host`.
-8. Connect once to verify the stored credentials.
-9. Display a concise capability summary.
-10. Close the connection cleanly.
+3. Ignore known non-TV `pyatv` models (HomePod, AirPort Express, Music/iTunes).
+   Devices with `DeviceModel.Unknown` may be selected, with an explicit warning.
+4. Show discovered devices that can be used with stored credentials.
+5. Allow the user to select the target Apple TV.
+6. Save its stable identifier.
+7. Save its display name for diagnostics.
+8. Save its current host as `preferred_host`.
+9. Connect once to verify the stored credentials.
+10. Display a concise capability summary.
+11. Close the connection cleanly.
 
 A later version may replace the `atvremote wizard` step with a custom pairing flow.
 
@@ -517,6 +519,13 @@ unavailable” exceptions (`NotSupportedError`, `InvalidStateError`) may be
 treated as absent metadata.
 
 Do not automatically replay a non-idempotent operation after an uncertain transport failure.
+
+Capability checks, status/app reads, and other preflight observations are not
+command delivery. A connection failure during those reads must not be reported
+as `UncertainExecutionError` even when the outer operation is non-idempotent.
+`may_have_been_delivered` is set only for the actual mutating pyatv call.
+`BlockedStateError` is a local rejection of a closed session and never counts
+as delivery.
 
 Example:
 
@@ -792,7 +801,15 @@ on  → atv.power.turn_on(...)
 off → atv.power.turn_off(...)
 ```
 
-Prefer waiting for an observed state transition when supported, bounded by the command timeout.
+Prefer waiting for an observed state transition when the active power protocol
+supports `await_new_state`. pyatv 0.18.0 Companion (the facade's preferred power
+implementation) advertises `TurnOn`/`TurnOff` as available but raises
+`NotImplementedError` when `await_new_state=True`. Power commands therefore
+dispatch with `await_new_state=False` and treat `power_state` on the same
+connection as a best-effort observation. If the resulting state cannot be
+verified, `PowerResult.power_state` is `unknown` rather than failing a command
+that already executed. Do not reconnect after power-off solely to verify state;
+a reconnect/wake can undo shutdown.
 
 Output:
 
@@ -1287,6 +1304,7 @@ Responsibilities:
 
 - Load `pyatv` storage.
 - Discover devices.
+- Reject known non-TV models (HomePod, AirPort Express, Music); warn on unknown.
 - Select the target.
 - Save stable identity.
 - Save preferred host.

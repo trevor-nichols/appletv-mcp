@@ -14,7 +14,11 @@ from appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
 from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
 from appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
-from appletv_mcp.interfaces.cli.commands.configure import ConfigureError, run_configure
+from appletv_mcp.interfaces.cli.commands.configure import (
+    ConfigureError,
+    _apple_tv_candidates,
+    run_configure,
+)
 from appletv_mcp.interfaces.cli.commands.doctor import run_doctor
 from appletv_mcp.interfaces.cli.main import main
 from tests.helpers.factories import make_settings
@@ -86,6 +90,101 @@ async def test_configure_saves_selected_device(
     assert saved.device_identifier == device.identifier
     assert saved.preferred_host == device.address
     assert "Capability summary" in stdout.getvalue()
+
+
+def test_configure_candidates_ignore_known_non_tv_devices() -> None:
+    stdout = StringIO()
+    tv = discovered(name="Living Room", device_model="Gen4K")
+    pod = discovered(name="Kitchen", identifier="11:22:33:44:55:66", device_model="HomePod")
+    music = discovered(name="Mac", identifier="aa:bb:cc:dd:ee:01", device_model="Music")
+    candidates = _apple_tv_candidates([pod, music, tv], stdout)
+    assert [device.identifier for device in candidates] == [tv.identifier]
+    output = stdout.getvalue()
+    assert "Ignored non-Apple-TV device(s)" in output
+    assert "Kitchen" in output
+    assert "Mac" in output
+
+
+def test_configure_candidates_allow_unknown_model_with_warning() -> None:
+    stdout = StringIO()
+    unknown = discovered(name="Mystery", device_model="Unknown")
+    candidates = _apple_tv_candidates([unknown], stdout)
+    assert candidates == [unknown]
+    assert "unknown model" in stdout.getvalue()
+
+
+def test_configure_candidates_reject_when_only_non_tv_devices() -> None:
+    stdout = StringIO()
+    pod = discovered(name="Kitchen", device_model="HomePod")
+    with pytest.raises(ConfigureError, match="non-TV"):
+        _apple_tv_candidates([pod], stdout)
+
+
+async def test_configure_does_not_save_homepod(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    stdout = StringIO()
+    tv = discovered(name="Living Room", device_model="Gen4K")
+    pod = discovered(name="Kitchen", identifier="11:22:33:44:55:66", device_model="HomePod")
+
+    async def fake_scan(
+        self: object,
+        *,
+        timeout: float,
+        identifier: str | None = None,
+        hosts: Sequence[str] | None = None,
+    ) -> list[DiscoveredDevice]:
+        return [pod, tv]
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvScanner.scan",
+        fake_scan,
+    )
+
+    class DummyStorage:
+        async def load(self) -> object:
+            return object()
+
+        async def close(self) -> None:
+            return None
+
+    def fake_storage(path: Path | None = None) -> DummyStorage:
+        return DummyStorage()
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvStorageAdapter",
+        fake_storage,
+    )
+
+    controller = AppleTVController(FakeGateway())
+
+    class DummyRuntime:
+        def __init__(self) -> None:
+            self.controller = controller
+
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_create_runtime(**_kwargs: object) -> DummyRuntime:
+        return DummyRuntime()
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.create_runtime",
+        fake_create_runtime,
+    )
+
+    code = await run_configure(
+        stdin=StringIO(),
+        stdout=stdout,
+        settings_repository=repo,
+        selector=lambda devices: devices[0],
+    )
+    assert code == 0
+    saved = repo.load()
+    assert saved.device_identifier == tv.identifier
+    assert saved.device_identifier != pod.identifier
+    assert "Kitchen" in stdout.getvalue()
 
 
 async def test_run_configure_translates_storage_error_and_closes_adapter(
