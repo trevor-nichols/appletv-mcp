@@ -1,0 +1,243 @@
+"""In-memory fakes for application and infrastructure tests."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
+
+from agenai_appletv_mcp.application.ports.apple_tv import DiscoveredDevice
+from agenai_appletv_mcp.domain.enums import (
+    FeatureAvailability,
+    NormalizedOperation,
+    PlaybackAction,
+    PowerState,
+    PressAction,
+    RemoteButton,
+    SkipDirection,
+    VolumeDirection,
+)
+from agenai_appletv_mcp.domain.models.capabilities import AppleTVCapabilities
+from agenai_appletv_mcp.domain.models.device import AppInfo
+from agenai_appletv_mcp.domain.models.settings import Settings
+from agenai_appletv_mcp.domain.models.status import AppleTVStatus
+from tests.helpers.factories import (
+    DEFAULT_IDENTIFIER,
+    make_app,
+    make_capabilities,
+    make_status,
+)
+
+
+class MemorySettingsRepository:
+    def __init__(self, settings: Settings | None = None) -> None:
+        self._settings = settings
+        self.saves: list[Settings] = []
+
+    def exists(self) -> bool:
+        return self._settings is not None
+
+    def load(self) -> Settings:
+        if self._settings is None:
+            from agenai_appletv_mcp.domain.errors import DeviceNotConfiguredError
+
+            raise DeviceNotConfiguredError("No Apple TV is configured.")
+        return self._settings
+
+    def save(self, settings: Settings) -> None:
+        self._settings = settings
+        self.saves.append(settings)
+
+    def update_preferred_host(self, host: str) -> Settings:
+        settings = self.load().model_copy(update={"preferred_host": host})
+        self.save(settings)
+        return settings
+
+
+class FakeAppleTV:
+    def __init__(self) -> None:
+        self.listener: Any = None
+        self.close_calls = 0
+
+    def close(self) -> set[asyncio.Task[Any]]:
+        self.close_calls += 1
+        if self.listener is not None:
+            self.listener.connection_closed()
+        return set()
+
+
+class FakeScanner:
+    def __init__(self, devices: Sequence[DiscoveredDevice] | None = None) -> None:
+        self.devices = list(devices or [])
+        self.calls: list[dict[str, Any]] = []
+        self.error: Exception | None = None
+        self.delay = 0.0
+
+    async def scan(
+        self,
+        *,
+        timeout: float,
+        identifier: str | None = None,
+        hosts: Sequence[str] | None = None,
+    ) -> list[DiscoveredDevice]:
+        self.calls.append(
+            {"timeout": timeout, "identifier": identifier, "hosts": list(hosts or [])}
+        )
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+        found = list(self.devices)
+        if hosts:
+            found = [device for device in found if device.address in hosts]
+        if identifier:
+            found = [device for device in found if device.matches(identifier)]
+        return found
+
+
+class FakeGateway:
+    def __init__(self) -> None:
+        self.status_value = make_status()
+        self.capabilities_value = make_capabilities()
+        self.apps: list[AppInfo] = [
+            make_app("Netflix", "com.netflix.Netflix"),
+            make_app("YouTube", "com.google.ios.youtube"),
+            make_app("TV", "com.apple.TV"),
+        ]
+        self.features: dict[NormalizedOperation, FeatureAvailability] = dict.fromkeys(
+            NormalizedOperation, FeatureAvailability.AVAILABLE
+        )
+        self.power_state = PowerState.ON
+        self.volume: float | None = 20.0
+        self.calls: list[tuple[str, object]] = []
+        self.fail_with: Exception | None = None
+        self.fail_on: set[str] = set()
+        self.fail_after_calls: dict[str, int] = {}
+        self._call_counts: dict[str, int] = {}
+        self.invalidate_calls = 0
+        self.reconnect_calls = 0
+        self.closed = False
+        self.launch_log: list[str] = []
+        self.press_log: list[tuple[RemoteButton, PressAction]] = []
+        self.playback_log: list[PlaybackAction] = []
+        self.skip_log: list[tuple[SkipDirection, float]] = []
+        self.text_log: list[str] = []
+        self.volume_log: list[tuple[str, object]] = []
+
+    def fail(self, exc: Exception, *operations: str) -> None:
+        self.fail_with = exc
+        self.fail_on = set(operations)
+
+    async def close(self) -> None:
+        self.closed = True
+
+    def invalidate(self) -> None:
+        self.invalidate_calls += 1
+
+    async def reconnect(self) -> None:
+        self.reconnect_calls += 1
+
+    def unreachable_status(self) -> AppleTVStatus:
+        return make_status(
+            connection="unreachable", playback=None, media_app=None, volume_percent=None
+        )
+
+    async def read_status(self) -> AppleTVStatus:
+        self._before("status")
+        return self.status_value
+
+    async def read_capabilities(self) -> AppleTVCapabilities:
+        self._before("capabilities")
+        return self.capabilities_value
+
+    async def read_apps(self) -> list[AppInfo]:
+        self._before("list_apps")
+        return list(self.apps)
+
+    async def feature_state(self, operation: NormalizedOperation) -> FeatureAvailability:
+        self._before("feature_state")
+        return self.features[operation]
+
+    async def turn_on(self, *, await_new_state: bool) -> PowerState:
+        self._before("turn_on")
+        self.power_state = PowerState.ON
+        return self.power_state
+
+    async def turn_off(self, *, await_new_state: bool) -> PowerState:
+        self._before("turn_off")
+        self.power_state = PowerState.OFF
+        return self.power_state
+
+    async def current_power_state(self) -> PowerState:
+        self._before("current_power_state")
+        return self.power_state
+
+    async def launch_app(self, bundle_id_or_url: str) -> None:
+        self._before("launch_app")
+        self.launch_log.append(bundle_id_or_url)
+
+    async def press(self, button: RemoteButton, action: PressAction) -> None:
+        self._before("press")
+        self.press_log.append((button, action))
+
+    async def playback(self, action: PlaybackAction) -> None:
+        self._before("playback")
+        self.playback_log.append(action)
+
+    async def seek(self, position_seconds: int) -> None:
+        self._before("seek")
+        self.calls.append(("seek", position_seconds))
+
+    async def skip(self, direction: SkipDirection, seconds: float) -> None:
+        self._before("skip")
+        self.skip_log.append((direction, seconds))
+
+    async def set_text(self, text: str) -> None:
+        self._before("set_text")
+        self.text_log.append(text)
+
+    async def set_volume(self, percent: float) -> float | None:
+        self._before("set_volume")
+        self.volume = percent
+        self.volume_log.append(("set", percent))
+        return self.volume
+
+    async def volume_step(self, direction: VolumeDirection) -> None:
+        self._before("volume_step")
+        self.volume_log.append(("step", direction))
+
+    async def current_volume(self) -> float | None:
+        self._before("current_volume")
+        return self.volume
+
+    def _before(self, operation: str) -> None:
+        self._call_counts[operation] = self._call_counts.get(operation, 0) + 1
+        self.calls.append((operation, None))
+        if self.fail_with is None:
+            return
+        if self.fail_on and operation not in self.fail_on:
+            return
+        limit = self.fail_after_calls.get(operation)
+        if limit is not None and self._call_counts[operation] <= limit:
+            return
+        raise self.fail_with
+
+
+def discovered(
+    *,
+    identifier: str = DEFAULT_IDENTIFIER,
+    name: str = "Living Room",
+    address: str = "192.168.1.50",
+    extras: Sequence[str] = (),
+) -> DiscoveredDevice:
+    return DiscoveredDevice(
+        identifier=identifier,
+        all_identifiers=(identifier, *extras),
+        name=name,
+        address=address,
+        model="Apple TV 4K",
+        config=object(),
+    )
+
+
+ConnectFn = Callable[[object], Awaitable[FakeAppleTV]]
