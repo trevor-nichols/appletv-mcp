@@ -98,8 +98,7 @@ def _apple_tv_candidates(
             detail = f" Found non-TV device(s): {', '.join(device.name for device in others)}."
         raise ConfigureError(
             "No Apple TVs were discovered. Confirm the TV is on the same network "
-            "and that pairing exists in `atvremote` storage (`atvremote wizard`)."
-            + detail
+            "and that pairing exists in `atvremote` storage (`atvremote wizard`)." + detail
         )
     return candidates
 

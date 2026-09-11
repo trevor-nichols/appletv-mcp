@@ -90,9 +90,7 @@ def translate_exception(
     if isinstance(exc, pyatv_exceptions.BackOffError):
         return CommandFailedError("Apple TV requested a backoff period; retry later.")
     if isinstance(exc, pyatv_exceptions.InvalidResponseError):
-        return CommandFailedError(
-            f"The Apple TV returned an invalid response during {operation}."
-        )
+        return CommandFailedError(f"The Apple TV returned an invalid response during {operation}.")
     if isinstance(exc, pyatv_exceptions.InvalidConfigError):
         return ConfigurationError(
             f"Apple TV protocol configuration is invalid while performing {operation}."
