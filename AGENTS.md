@@ -675,7 +675,7 @@ capabilities
 list_apps
 absolute seek
 absolute set_volume
-power request when final state can be verified
+power on
 ```
 
 ### Must not blindly replay after uncertain dispatch
@@ -692,15 +692,25 @@ previous
 relative skip
 relative volume adjustment
 deep-link / URL launch
+power off after uncertain dispatch
 ```
 
-If a connection fails after a non-idempotent command may have been delivered:
+If a connection fails after a replay-unsafe command may have been delivered:
 
 1. Invalidate the connection.
 2. Close/dispose the retained session without opening a replacement.
 3. Do not replay the command.
 4. Raise an uncertainty error.
 5. Translate it into `ToolError`.
+
+The same rule applies to the retry attempt: a safe-to-retry first failure may
+reconnect once, but if the second dispatch is then uncertain, raise
+`UncertainExecutionError` instead of a raw connection error.
+
+Companion often wraps timeouts and dropped connections as `ProtocolError`. Translate
+those back to `CommandTimeoutError` / `DeviceConnectionError` when the cause chain
+or a stale connection listener says the transport failed. Only a protocol rejection
+on a still-healthy session is `CommandFailedError`.
 
 Error text should explain why retry did not occur.
 
@@ -804,6 +814,8 @@ Recommended defaults:
 appletv_mcp           INFO
 pyatv                 WARNING
 ```
+
+`--debug` raises `appletv_mcp` to DEBUG. Keep `pyatv` at WARNING. Companion logs full OPACK frames at DEBUG, including RTI keyboard payloads and pairing credentials; those cannot be redacted reliably after serialization.
 
 Support explicit debug logging.
 

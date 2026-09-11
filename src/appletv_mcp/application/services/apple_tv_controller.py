@@ -121,7 +121,7 @@ class AppleTVController:
                 power_state=_confirmed_power_state(state, observed),
             )
 
-        return await self._write(OperationKind.IDEMPOTENT_WRITE, f"power {state.value}", _power)
+        return await self._write(_power_kind(state), f"power {state.value}", _power)
 
     async def open_app(self, app: str) -> OpenAppResult:
         async def _open() -> OpenAppResult:
@@ -289,6 +289,15 @@ def _confirmed_power_state(requested: PowerTarget, observed: PowerState) -> Powe
     if requested is PowerTarget.OFF and observed is PowerState.OFF:
         return PowerState.OFF
     return PowerState.UNKNOWN
+
+
+def _power_kind(state: PowerTarget) -> OperationKind:
+    # Power-on is replay-safe: reconnect/wake moves toward the requested state.
+    # Power-off is not: unicast rediscovery knocks ports to wake a sleeping TV,
+    # so retrying Sleep after an uncertain dispatch can undo the shutdown.
+    if state is PowerTarget.ON:
+        return OperationKind.IDEMPOTENT_WRITE
+    return OperationKind.REPLAY_UNSAFE
 
 
 def validate_deep_link(url: str) -> str:

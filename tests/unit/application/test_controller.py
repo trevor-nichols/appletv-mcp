@@ -276,6 +276,53 @@ async def test_toggle_not_replayed_after_uncertain_failure() -> None:
     assert gateway.disconnect_calls == 1
 
 
+async def test_preflight_retry_then_dispatch_uncertain_is_uncertain() -> None:
+    controller, gateway = _controller()
+    gateway.fail(
+        DeviceConnectionError("preflight", may_have_been_delivered=False),
+        "feature_state",
+    )
+    original = gateway.reconnect
+
+    async def reconnect() -> None:
+        await original()
+        gateway.fail(
+            DeviceConnectionError("lost after right", may_have_been_delivered=True),
+            "press",
+        )
+
+    gateway.reconnect = reconnect  # type: ignore[method-assign]
+    with pytest.raises(UncertainExecutionError, match="not retried"):
+        await controller.press(RemoteButton.RIGHT, PressAction.TAP, 1)
+    assert gateway.reconnect_calls == 1
+    assert gateway.press_log == []
+    assert gateway.disconnect_calls == 1
+
+
+async def test_power_off_not_replayed_after_uncertain_failure() -> None:
+    controller, gateway = _controller()
+    gateway.fail(DeviceConnectionError("lost", may_have_been_delivered=True), "turn_off")
+    with pytest.raises(UncertainExecutionError, match="not retried"):
+        await controller.power(PowerTarget.OFF)
+    assert gateway.reconnect_calls == 0
+    assert gateway.disconnect_calls == 1
+
+
+async def test_power_on_is_retried_after_uncertain_failure() -> None:
+    controller, gateway = _controller()
+    gateway.fail(DeviceConnectionError("lost", may_have_been_delivered=True), "turn_on")
+    original = gateway.reconnect
+
+    async def reconnect() -> None:
+        await original()
+        gateway.fail_with = None
+
+    gateway.reconnect = reconnect  # type: ignore[method-assign]
+    result = await controller.power(PowerTarget.ON)
+    assert result.requested_state is PowerTarget.ON
+    assert gateway.reconnect_calls == 1
+
+
 async def test_relative_skip_not_replayed() -> None:
     controller, gateway = _controller()
     gateway.fail(DeviceConnectionError("lost", may_have_been_delivered=True), "skip")

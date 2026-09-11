@@ -1,5 +1,7 @@
 """Map pyatv exceptions to domain errors without leaking credentials."""
 
+from collections.abc import Iterator
+
 from pyatv import exceptions as pyatv_exceptions
 
 from appletv_mcp.domain.errors import (
@@ -50,6 +52,7 @@ def translate_exception(
     *,
     operation: str,
     may_have_been_delivered: bool,
+    connection_stale: bool = False,
 ) -> Exception:
     """Return a domain error equivalent to `exc`, or `exc` if unexpected."""
 
@@ -100,5 +103,60 @@ def translate_exception(
     if isinstance(exc, pyatv_exceptions.CommandError):
         return CommandFailedError(f"The Apple TV rejected the {operation} command.")
     if isinstance(exc, pyatv_exceptions.ProtocolError):
-        return CommandFailedError(f"A protocol error occurred during {operation}.")
+        return _translate_protocol_error(
+            exc,
+            operation=operation,
+            may_have_been_delivered=may_have_been_delivered,
+            connection_stale=connection_stale,
+        )
     return exc
+
+
+_TIMEOUT_CAUSES = (TimeoutError, pyatv_exceptions.OperationTimeoutError)
+_CONNECTION_CAUSES = (
+    pyatv_exceptions.ConnectionLostError,
+    pyatv_exceptions.ConnectionFailedError,
+    ConnectionError,
+)
+
+
+def _translate_protocol_error(
+    exc: pyatv_exceptions.ProtocolError,
+    *,
+    operation: str,
+    may_have_been_delivered: bool,
+    connection_stale: bool,
+) -> Exception:
+    """Map Companion-wrapped transport failures back to connection/timeout errors.
+
+    CompanionAPI._send_command catches almost any exchange failure and re-raises
+    ProtocolError. exchange_opack waits for a response with a timeout, so a dropped
+    link after dispatch commonly surfaces as ProtocolError caused by TimeoutError.
+    Genuine protocol/application rejections while the session is still healthy stay
+    CommandFailedError.
+    """
+
+    if _chain_matches(exc, _TIMEOUT_CAUSES):
+        return CommandTimeoutError(
+            f"The {operation} command timed out.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    if connection_stale or _chain_matches(exc, _CONNECTION_CAUSES):
+        return DeviceConnectionError(
+            f"The Apple TV connection failed while performing {operation}.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    return CommandFailedError(f"A protocol error occurred during {operation}.")
+
+
+def _chain_matches(exc: BaseException, types: tuple[type[BaseException], ...]) -> bool:
+    return any(isinstance(item, types) for item in _exception_chain(exc))
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        yield current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__

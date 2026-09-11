@@ -96,6 +96,8 @@ Debug logging:
 uv run appletv-mcp serve --debug
 ```
 
+`--debug` raises `appletv_mcp` to DEBUG. The `pyatv` logger stays at WARNING so Companion OPACK dumps (which include keyboard text and credentials) never reach the log.
+
 ## MCP host configuration
 
 Use an absolute project path. Example generic stdio config:
@@ -195,7 +197,7 @@ Do not run the live suite unless a paired Apple TV is available. Read-only live 
 
 - Pairing credentials remain in local pyatv storage
 - Credentials are not MCP parameters or results
-- Keyboard text is not logged
+- Keyboard text is not logged (`--debug` does not enable raw pyatv protocol dumps)
 - v0.1 is local stdio only
 
 ## License

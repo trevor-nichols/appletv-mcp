@@ -4,7 +4,12 @@ from collections.abc import Callable
 
 import pytest
 from pyatv.const import PowerState as PyatvPowerState
-from pyatv.exceptions import BlockedStateError, ConnectionLostError, NotSupportedError
+from pyatv.exceptions import (
+    BlockedStateError,
+    ConnectionLostError,
+    NotSupportedError,
+    ProtocolError,
+)
 
 from appletv_mcp.application.services.apple_tv_controller import AppleTVController
 from appletv_mcp.domain.enums import (
@@ -15,7 +20,7 @@ from appletv_mcp.domain.enums import (
     PressAction,
     RemoteButton,
 )
-from appletv_mcp.domain.errors import UncertainExecutionError
+from appletv_mcp.domain.errors import CommandFailedError, UncertainExecutionError
 from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
 from appletv_mcp.infrastructure.pyatv.gateway import PyAtvGateway
 from tests.helpers.factories import make_settings
@@ -193,6 +198,43 @@ async def test_blocked_state_during_command_is_not_uncertain() -> None:
         assert result.completed == 1
         assert len(created) == 2
         assert created[0].close_calls == 1
+    finally:
+        await manager.close()
+
+
+def _protocol_timeout() -> ProtocolError:
+    error = ProtocolError("Command _hidC failed")
+    error.__cause__ = TimeoutError("response wait")
+    return error
+
+
+async def test_protocol_error_timeout_cause_is_uncertain_for_press() -> None:
+    created: list[FakeAppleTV] = []
+
+    def prepare(device: FakeAppleTV, _devices: list[FakeAppleTV]) -> None:
+        device.command_error = _protocol_timeout()
+
+    controller, manager = _controller(created, prepare)
+    try:
+        with pytest.raises(UncertainExecutionError, match="not retried"):
+            await controller.press(RemoteButton.RIGHT, PressAction.TAP, 1)
+        assert len(created) == 1
+        assert created[0].close_calls == 1
+    finally:
+        await manager.close()
+
+
+async def test_genuine_protocol_error_is_not_retried() -> None:
+    created: list[FakeAppleTV] = []
+
+    def prepare(device: FakeAppleTV, _devices: list[FakeAppleTV]) -> None:
+        device.command_error = ProtocolError("Command failed: missing field")
+
+    controller, manager = _controller(created, prepare)
+    try:
+        with pytest.raises(CommandFailedError, match="protocol error"):
+            await controller.press(RemoteButton.RIGHT, PressAction.TAP, 1)
+        assert len(created) == 1
     finally:
         await manager.close()
 

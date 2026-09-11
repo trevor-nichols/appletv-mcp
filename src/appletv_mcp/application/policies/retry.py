@@ -16,6 +16,7 @@ from appletv_mcp.domain.errors import (
 logger = logging.getLogger(__name__)
 
 _CONNECTION_ERRORS = (DeviceConnectionError, DeviceUnreachableError, CommandTimeoutError)
+_REPLAY_UNSAFE = {OperationKind.NON_IDEMPOTENT, OperationKind.REPLAY_UNSAFE}
 
 
 async def execute[T](
@@ -42,12 +43,9 @@ async def _recover[T](
     delivered = getattr(exc, "may_have_been_delivered", False)
     gateway.invalidate()
 
-    if kind is OperationKind.NON_IDEMPOTENT and delivered:
+    if _is_uncertain(kind, delivered):
         await gateway.disconnect()
-        raise UncertainExecutionError(
-            f"The connection was lost after the {operation_label} command may have "
-            "been delivered. The command was not retried to avoid executing it twice."
-        ) from exc
+        raise _uncertain_error(operation_label) from exc
 
     logger.info("Reconnecting after %s failed: %s", operation_label, exc.message)
     try:
@@ -61,5 +59,19 @@ async def _recover[T](
         return await action()
     except _CONNECTION_ERRORS as retry_error:
         gateway.invalidate()
+        if _is_uncertain(kind, getattr(retry_error, "may_have_been_delivered", False)):
+            await gateway.disconnect()
+            raise _uncertain_error(operation_label) from retry_error
         await gateway.disconnect()
         raise retry_error from exc
+
+
+def _is_uncertain(kind: OperationKind, delivered: bool) -> bool:
+    return kind in _REPLAY_UNSAFE and delivered
+
+
+def _uncertain_error(operation_label: str) -> UncertainExecutionError:
+    return UncertainExecutionError(
+        f"The connection was lost after the {operation_label} command may have "
+        "been delivered. The command was not retried to avoid executing it twice."
+    )

@@ -129,3 +129,6 @@ class OperationKind(StrEnum):
     READ = "read"
     IDEMPOTENT_WRITE = "idempotent_write"
     NON_IDEMPOTENT = "non_idempotent"
+    # Semantically idempotent, but reconnect/wake makes automatic replay unsafe
+    # (e.g. power off after an uncertain Sleep dispatch).
+    REPLAY_UNSAFE = "replay_unsafe"

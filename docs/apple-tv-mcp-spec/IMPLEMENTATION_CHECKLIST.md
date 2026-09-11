@@ -38,6 +38,10 @@ Not executed (hardware-dependent):
 - `apple_tv_open_url` is non-idempotent (`idempotent_hint=False`) because deep links may have side effects. `apple_tv_open_app` by resolved bundle ID remains idempotent.
 - Power commands call `turn_on`/`turn_off` with `await_new_state=False` because pyatv 0.18.0 Companion raises `NotImplementedError` when waiting is requested, while still advertising those features as available. Observed `power_state` is best-effort on the same connection; unverifiable results are `unknown`. Reconnect is not used to confirm power-off.
 - Gateway `_run` distinguishes observation (`delivery_risk=False`: status, capabilities, apps, feature preflight) from mutating commands (`delivery_risk=True`). `BlockedStateError` always maps to `may_have_been_delivered=False`.
+- Companion `ProtocolError` wrapping a timeout/connection failure, or raised after the device listener marked the session stale, is translated as `CommandTimeoutError`/`DeviceConnectionError` with the original `delivery_risk`. Healthy-session protocol rejections stay `CommandFailedError`.
+- Retry applies the uncertain-delivery rule to both the first failure and the post-reconnect attempt.
+- Power-off uses `OperationKind.REPLAY_UNSAFE` so uncertain Sleep is not replayed; unicast rediscovery knocks ports and can wake the TV. Power-on remains an idempotent write. MCP `apple_tv_power` still has `idempotent_hint=True`.
+- `--debug` does not enable `pyatv` DEBUG (Companion OPACK dumps include keyboard text and credentials).
 - `configure` rejects known non-Apple-TV pyatv models (HomePod, AirPort Express, Music) and allows `DeviceModel.Unknown` with a warning.
 - MCP Inspector GUI was not available; `tests/contract/mcp/test_stdio_transport.py` exercises the real stdio process.
 

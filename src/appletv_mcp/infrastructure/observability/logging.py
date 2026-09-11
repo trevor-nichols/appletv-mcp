@@ -30,4 +30,6 @@ def configure_logging(*, debug: bool = False) -> None:
 
     root.setLevel(logging.DEBUG if debug else logging.INFO)
     logging.getLogger(_APP_LOGGER).setLevel(logging.DEBUG if debug else logging.INFO)
-    logging.getLogger(_PYATV_LOGGER).setLevel(logging.DEBUG if debug else logging.WARNING)
+    # Never enable pyatv DEBUG. Companion logs full OPACK frames, including RTI
+    # keyboard payloads and pairing credentials, which cannot be reliably redacted.
+    logging.getLogger(_PYATV_LOGGER).setLevel(logging.WARNING)

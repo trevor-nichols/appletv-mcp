@@ -547,7 +547,7 @@ Safe for one automatic retry after reconnect:
 - App listing.
 - Explicit absolute volume set.
 - Explicit absolute seek.
-- Power request when state can be verified.
+- Power-on after reconnect (reconnect/wake moves toward on).
 
 Do not replay automatically:
 
@@ -559,8 +559,13 @@ Do not replay automatically:
 - Play/pause toggle.
 - Relative skips when execution is uncertain.
 - URL / deep-link launches.
+- Power-off after uncertain dispatch (unicast rediscovery knocks ports and can wake the TV).
 
-When a non-idempotent command fails after dispatch uncertainty, return a `ToolError` explaining that execution state is uncertain.
+When a replay-unsafe command fails after dispatch uncertainty, return a `ToolError` explaining that execution state is uncertain.
+
+The same check applies to the retry attempt. A first failure that was safe to retry may reconnect once; if the second dispatch then fails after possible delivery, raise `UncertainExecutionError` rather than a raw connection error.
+
+Companion `ProtocolError` is cause-aware: a timeout or connection failure in `__cause__`/`__context__`, or a stale connection listener, is a connection/timeout error that participates in retry/uncertainty. A protocol/application rejection while the session is still healthy is `CommandFailedError`.
 
 ---
 
@@ -1266,7 +1271,7 @@ appletv_mcp           INFO
 pyatv                 WARNING
 ```
 
-Debug mode may enable additional `pyatv` diagnostics.
+`--debug` raises `appletv_mcp` to DEBUG and leaves `pyatv` at WARNING. Companion DEBUG logs include full OPACK frames (keyboard text, credentials).
 
 Normal logs must never contain:
 

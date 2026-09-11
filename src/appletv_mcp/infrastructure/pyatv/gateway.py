@@ -271,7 +271,10 @@ class PyAtvGateway:
             raise
         except Exception as exc:
             mapped = translate_exception(
-                exc, operation=operation, may_have_been_delivered=delivered
+                exc,
+                operation=operation,
+                may_have_been_delivered=delivered,
+                connection_stale=not self._connections.cached,
             )
             if mapped is not exc:
                 raise mapped from exc
