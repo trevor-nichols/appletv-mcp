@@ -25,6 +25,16 @@ Not executed (hardware-dependent):
 - MCP Inspector GUI (stdio transport was verified with the MCP Python SDK in-process client and a real stdio subprocess)
 - Git release tag
 
+v0.1 hardware verification (manual; do not treat as done until run on a real Apple TV):
+
+- `atvremote wizard` → `appletv-mcp configure` → `appletv-mcp doctor`
+- `apple_tv_status`, `apple_tv_capabilities`, `apple_tv_list_apps`
+- `apple_tv_power(on)`, `apple_tv_open_app(...)`, `apple_tv_playback(play/pause)`, `apple_tv_seek(...)`
+- `apple_tv_press(home/back/arrows)`, `apple_tv_set_text(...)` with a focused text field
+- `apple_tv_set_volume(...)`, `apple_tv_adjust_volume(...)`
+- `apple_tv_power(off)` then `apple_tv_power(on)`
+- Restart MCP and verify reconnect
+
 ## Implementation notes / deviations
 
 - Architecture follows the layered tree in the development prompt, not the flat sketch in SPEC §5.
@@ -40,7 +50,7 @@ Not executed (hardware-dependent):
 - Gateway `_run` distinguishes observation (`delivery_risk=False`: status, capabilities, apps, feature preflight) from mutating commands (`delivery_risk=True`). `BlockedStateError` always maps to `may_have_been_delivered=False`.
 - Companion `ProtocolError` wrapping a timeout/connection failure, or raised after the device listener marked the session stale, is translated as `CommandTimeoutError`/`DeviceConnectionError` with the original `delivery_risk`. Healthy-session protocol rejections stay `CommandFailedError`.
 - Retry applies the uncertain-delivery rule to both the first failure and the post-reconnect attempt.
-- Power-off uses `OperationKind.REPLAY_UNSAFE` so uncertain Sleep is not replayed; unicast rediscovery knocks ports and can wake the TV. Power-on remains an idempotent write. MCP `apple_tv_power` still has `idempotent_hint=True`.
+- Power-off uses `OperationKind.REPLAY_UNSAFE` so uncertain Sleep is not replayed; unicast rediscovery knocks ports and can wake the TV. Power-on remains an idempotent write. MCP `apple_tv_power` advertises `idempotent_hint=False` because annotations cannot split ON vs OFF and clients may treat `true` as retry-safe.
 - `--debug` does not enable `pyatv` DEBUG (Companion OPACK dumps include keyboard text and credentials).
 - `configure` rejects known non-Apple-TV pyatv models (HomePod, AirPort Express, Music) and allows `DeviceModel.Unknown` with a warning.
 - MCP Inspector GUI was not available; `tests/contract/mcp/test_stdio_transport.py` exercises the real stdio process.
@@ -849,7 +859,7 @@ Implement:
 
 - [x] Typed `state`.
 - [x] Typed result.
-- [x] `idempotent_hint=True`.
+- [x] `idempotent_hint=False` (annotations cannot split ON vs OFF; clients may treat `true` as retry-safe).
 - [x] `destructive_hint=False`.
 - [x] `open_world_hint=False`.
 

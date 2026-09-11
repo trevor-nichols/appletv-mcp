@@ -892,7 +892,8 @@ idempotent_hint=True
 open_world_hint=False
 ```
 
-Relative/toggle operations and deep-link launches:
+Relative/toggle operations, deep-link launches, and `apple_tv_power`
+(annotations cannot split ON vs OFF; power-off is replay-unsafe):
 
 ```text
 idempotent_hint=False

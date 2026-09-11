@@ -829,9 +829,15 @@ Tool annotations:
 ```text
 read_only_hint = false
 destructive_hint = false
-idempotent_hint = true
+idempotent_hint = false
 open_world_hint = false
 ```
+
+Annotations are static and cannot say “on is retry-safe but off is not.”
+The whole tool is therefore conservative: MCP clients must not treat
+`apple_tv_power` as automatically retry-safe. Server-side, power-on remains
+an idempotent write; power-off is `REPLAY_UNSAFE` because reconnect/unicast
+discovery can wake the device before Sleep is sent again.
 
 ---
 
