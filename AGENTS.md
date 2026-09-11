@@ -1,8 +1,45 @@
-This file defines repository-wide instructions for coding agents working on `agenai-appletv-mcp`.
+This file defines repository-wide instructions for coding agents working on Apple TV MCP (`appletv-mcp`).
 
 These instructions apply to the entire repository unless a more specific nested `AGENTS.md` explicitly overrides them for a subtree.
 
 The project is a production-quality local MCP server that exposes semantic Apple TV control to AI agents through `pyatv`. Treat it as infrastructure software, not a demo.
+
+This project is named Apple TV MCP and is independent of AgenAI.
+Do not introduce AgenAI branding, package prefixes, CLI prefixes, repository
+links, environment-variable prefixes, or other AgenAI-specific naming.
+
+---
+
+## Naming
+
+Use these canonical names. Do not invent aliases, shims, or "compatible" old names.
+
+```text
+Human/product name:                              Apple TV MCP
+GitHub repository:                               trevor-nichols/appletv-mcp
+Python distribution/project name:                appletv-mcp
+Python import package:                           appletv_mcp
+Source package:                                  src/appletv_mcp/
+CLI executable:                                  appletv-mcp
+MCP server name:                                 appletv-mcp
+Configuration application/directory name:        appletv-mcp
+Configuration override environment variable:     APPLETV_MCP_CONFIG_DIR
+```
+
+Do not use:
+
+```text
+AgenAI Apple TV MCP
+agenai-appletv-mcp
+agenai_appletv_mcp
+agenai-appletv
+AGENAI_APPLETV_CONFIG_DIR
+github.com/agenai/...
+```
+
+MCP tool names remain `apple_tv_*` as listed in §8. Domain types such as `AppleTVController`, `AppleTVStatus`, and `AppleTVGateway` are not product-prefix names; do not rename them.
+
+Live-test environment variables `APPLE_TV_INTEGRATION_TESTS` and `APPLE_TV_LIVE_WRITES` are unrelated to product branding; do not rename them.
 
 ---
 
@@ -13,8 +50,8 @@ Before modifying code, inspect the repository and read the project documentation
 At minimum, read:
 
 ```text
-docs/SPEC.md
-docs/IMPLEMENTATION_CHECKLIST.md
+docs/apple-tv-mcp-spec/SPEC.md
+docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md
 ```
 
 Also inspect the pinned reference corpus under:
@@ -41,9 +78,9 @@ If file paths differ slightly, locate the actual files rather than assuming they
 
 When sources disagree, use this precedence:
 
-1. `docs/SPEC.md` — product behavior, architecture intent, and public contracts.
+1. `docs/apple-tv-mcp-spec/SPEC.md` — product behavior, architecture intent, and public contracts.
 2. `AGENTS.md` — repository-wide implementation rules.
-3. `docs/IMPLEMENTATION_CHECKLIST.md` — build order and completeness tracking.
+3. `docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md` — build order and completeness tracking.
 4. Pinned `pyatv 0.18.0` references — exact `pyatv` APIs and behavior.
 5. Pinned MCP Python SDK 2.2.0 references — exact SDK APIs and behavior.
 6. MCP 2026-07-28 specification — protocol semantics.
@@ -134,7 +171,7 @@ Preferred shape:
 
 ```text
 src/
-└── agenai_appletv_mcp/
+└── appletv_mcp/
     ├── domain/
     │   ├── enums.py
     │   ├── errors.py
@@ -463,7 +500,9 @@ scan_timeout_seconds    finite and > 0
 command_timeout_seconds finite and > 0
 ```
 
-Use `platformdirs` for application paths.
+Use `platformdirs` with application name `appletv-mcp` for application paths.
+
+The configuration directory may be overridden with `APPLETV_MCP_CONFIG_DIR` (tests and unusual installs). Do not introduce other environment-variable prefixes.
 
 Configuration writes should be atomic.
 
@@ -636,7 +675,7 @@ capabilities
 list_apps
 absolute seek
 absolute set_volume
-power request when final state can be verified
+power on
 ```
 
 ### Must not blindly replay after uncertain dispatch
@@ -652,14 +691,26 @@ next
 previous
 relative skip
 relative volume adjustment
+deep-link / URL launch
+power off after uncertain dispatch
 ```
 
-If a connection fails after a non-idempotent command may have been delivered:
+If a connection fails after a replay-unsafe command may have been delivered:
 
 1. Invalidate the connection.
-2. Do not replay the command.
-3. Raise an uncertainty error.
-4. Translate it into `ToolError`.
+2. Close/dispose the retained session without opening a replacement.
+3. Do not replay the command.
+4. Raise an uncertainty error.
+5. Translate it into `ToolError`.
+
+The same rule applies to the retry attempt: a safe-to-retry first failure may
+reconnect once, but if the second dispatch is then uncertain, raise
+`UncertainExecutionError` instead of a raw connection error.
+
+Companion often wraps timeouts and dropped connections as `ProtocolError`. Translate
+those back to `CommandTimeoutError` / `DeviceConnectionError` when the cause chain
+or a stale connection listener says the transport failed. Only a protocol rejection
+on a still-healthy session is `CommandFailedError`.
 
 Error text should explain why retry did not occur.
 
@@ -760,9 +811,11 @@ Application logs belong on stderr.
 Recommended defaults:
 
 ```text
-agenai_appletv_mcp    INFO
+appletv_mcp           INFO
 pyatv                 WARNING
 ```
+
+`--debug` raises `appletv_mcp` to DEBUG. Keep `pyatv` at WARNING. Companion logs full OPACK frames at DEBUG, including RTI keyboard payloads and pairing credentials; those cannot be redacted reliably after serialization.
 
 Support explicit debug logging.
 
@@ -839,7 +892,8 @@ idempotent_hint=True
 open_world_hint=False
 ```
 
-Relative/toggle operations:
+Relative/toggle operations, deep-link launches, and `apple_tv_power`
+(annotations cannot split ON vs OFF; power-off is replay-unsafe):
 
 ```text
 idempotent_hint=False
@@ -854,14 +908,16 @@ Annotations are metadata, not security controls.
 Implement:
 
 ```text
-agenai-appletv configure
-agenai-appletv doctor
-agenai-appletv serve
+appletv-mcp configure
+appletv-mcp doctor
+appletv-mcp serve
 ```
 
 CLI commands should reuse application/infrastructure services.
 
-Do not duplicate Apple TV behavior in command modules.
+Do not duplicate Apple TV behavior in command modules. `doctor` must use the
+same discovery path as the running server (preferred-host unicast, then
+identifier fallback), not a multicast-only shortcut.
 
 ### `configure`
 
@@ -1243,7 +1299,7 @@ Do not imply screen visibility or foreground-app knowledge.
 
 ## 36. Checklist Discipline
 
-`docs/IMPLEMENTATION_CHECKLIST.md` is a living project tracker.
+`docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md` is a living project tracker.
 
 As work is genuinely completed:
 
@@ -1376,7 +1432,7 @@ If not, say the live-device checks remain unexecuted.
 
 ### Deviations
 
-List any deliberate deviation from `docs/SPEC.md`.
+List any deliberate deviation from `docs/apple-tv-mcp-spec/SPEC.md`.
 
 ### Remaining work
 

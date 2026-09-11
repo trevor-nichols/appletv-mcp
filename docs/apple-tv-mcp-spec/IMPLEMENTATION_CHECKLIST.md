@@ -1,4 +1,69 @@
-# AgenAI Apple TV MCP — Implementation Checklist
+# Apple TV MCP — Implementation Checklist
+
+**Status as of 2026-09-11:** software implementation, unit tests, MCP contract tests, and stdio transport tests are complete. Product naming is Apple TV MCP (`appletv-mcp` / `appletv_mcp`). **Live Apple TV validation was not executed** in this environment because no physical device was available.
+
+## Current project state
+
+Completed in software (mocked / no hardware):
+
+- Layered package under `src/appletv_mcp/` (domain, application, infrastructure, interfaces)
+- Persistent config (atomic JSON, no credentials)
+- pyatv 0.18.0 `FileStorage` adapter compatible with `atvremote wizard`
+- Lazy connection manager, identifier-first discovery, preferred-host IPv4 unicast hint
+- Capability map verified against pyatv 0.18.0 `FeatureName`
+- `AppleTVController` with deterministic app resolution and retry/idempotency policy
+- 13 MCP v2 tools with typed inputs/outputs and `ToolAnnotations`
+- CLI: `configure`, `doctor`, `serve`
+- Quality gates: ruff, ruff format, pyright (0 errors), pytest
+
+Not executed (hardware-dependent):
+
+- `atvremote wizard` against a real Apple TV
+- `appletv-mcp configure` / `doctor` against a real Apple TV
+- Live pytest suite (`APPLE_TV_INTEGRATION_TESTS=1`)
+- Disruptive live writes (`APPLE_TV_LIVE_WRITES=1`)
+- MCP Inspector GUI (stdio transport was verified with the MCP Python SDK in-process client and a real stdio subprocess)
+- Git release tag
+
+v0.1 hardware verification (manual; do not treat as done until run on a real Apple TV):
+
+- `atvremote wizard` → `appletv-mcp configure` → `appletv-mcp doctor`
+- `apple_tv_status`, `apple_tv_capabilities`, `apple_tv_list_apps`
+- `apple_tv_power(on)`, `apple_tv_open_app(...)`, `apple_tv_playback(play/pause)`, `apple_tv_seek(...)`
+- `apple_tv_press(home/back/arrows)`, `apple_tv_set_text(...)` with a focused text field
+- `apple_tv_set_volume(...)`, `apple_tv_adjust_volume(...)`
+- `apple_tv_power(off)` then `apple_tv_power(on)`
+- Restart MCP and verify reconnect
+
+## Implementation notes / deviations
+
+- Architecture follows the layered tree in the development prompt, not the flat sketch in SPEC §5.
+- `preferred_host` is IPv4-only. pyatv 0.18.0 unicast `scan(hosts=...)` uses `IPv4Address`; hostnames are rejected at Settings validation.
+- `apple_tv_status` returns `connection=unreachable` after read retry exhaustion instead of always raising `ToolError`, so agents can inspect identity without treating an offline TV as a protocol failure. Write tools still surface `ToolError`.
+- Config directory can be overridden with `APPLETV_MCP_CONFIG_DIR` (tests and unusual installs).
+- Naming normalized to Apple TV MCP: distribution/CLI/MCP server `appletv-mcp`, import package `appletv_mcp` under `src/appletv_mcp/`, platformdirs app name `appletv-mcp`, config override `APPLETV_MCP_CONFIG_DIR`. No compatibility shims for former names.
+- `doctor` uses `OK`/`FAIL` words rather than symbols for screen-reader-friendly output.
+- `doctor` discovers the configured device through `ConnectionManager.resolve_device()` (preferred-host unicast, then identifier multicast), not a second scan algorithm.
+- Connection validity is separate from ownership: `invalidate()` marks the cached `pyatv` session stale and retains the object; `reconnect()`, `disconnect()`, `get()`, and `close()` close it.
+- `apple_tv_open_url` is non-idempotent (`idempotent_hint=False`) because deep links may have side effects. `apple_tv_open_app` by resolved bundle ID remains idempotent.
+- Power commands call `turn_on`/`turn_off` with `await_new_state=False` because pyatv 0.18.0 Companion raises `NotImplementedError` when waiting is requested, while still advertising those features as available. Observed `power_state` is best-effort on the same connection; unverifiable results are `unknown`. Reconnect is not used to confirm power-off.
+- Gateway `_run` distinguishes observation (`delivery_risk=False`: status, capabilities, apps, feature preflight) from mutating commands (`delivery_risk=True`). `BlockedStateError` always maps to `may_have_been_delivered=False`.
+- Companion `ProtocolError` wrapping a timeout/connection failure, or raised after the device listener marked the session stale, is translated as `CommandTimeoutError`/`DeviceConnectionError` with the original `delivery_risk`. Healthy-session protocol rejections stay `CommandFailedError`.
+- Retry applies the uncertain-delivery rule to both the first failure and the post-reconnect attempt.
+- Power-off uses `OperationKind.REPLAY_UNSAFE` so uncertain Sleep is not replayed; unicast rediscovery knocks ports and can wake the TV. Power-on remains an idempotent write. MCP `apple_tv_power` advertises `idempotent_hint=False` because annotations cannot split ON vs OFF and clients may treat `true` as retry-safe.
+- `--debug` does not enable `pyatv` DEBUG (Companion OPACK dumps include keyboard text and credentials).
+- `configure` rejects known non-Apple-TV pyatv models (HomePod, AirPort Express, Music) and allows `DeviceModel.Unknown` with a warning.
+- MCP Inspector GUI was not available; `tests/contract/mcp/test_stdio_transport.py` exercises the real stdio process.
+
+### Naming normalization (complete)
+
+- [x] Product name Apple TV MCP.
+- [x] Distribution, CLI, MCP server, and platformdirs app name: `appletv-mcp`.
+- [x] Import package `appletv_mcp` under `src/appletv_mcp/`.
+- [x] Config override `APPLETV_MCP_CONFIG_DIR` (previous override names removed; no shim).
+- [x] GitHub URLs `https://github.com/trevor-nichols/appletv-mcp` and `/issues`.
+
+---
 
 This checklist is ordered by dependency. Complete each phase before moving to later phases unless a task is explicitly marked as parallelizable.
 
@@ -10,48 +75,48 @@ The goal is to eliminate architectural decision-making during implementation: la
 
 ### 0.1 Create repository structure
 
-- [ ] Create `agenai-appletv-mcp/`.
-- [ ] Add `SPEC.md`.
-- [ ] Add `IMPLEMENTATION_CHECKLIST.md`.
-- [ ] Add `README.md`.
-- [ ] Add `.gitignore`.
-- [ ] Add `.python-version`.
-- [ ] Add `references/`.
-- [ ] Add `src/agenai_appletv_mcp/`.
-- [ ] Add `tests/`.
+- [x] Create `appletv-mcp/`.
+- [x] Add `SPEC.md`.
+- [x] Add `IMPLEMENTATION_CHECKLIST.md`.
+- [x] Add `README.md`.
+- [x] Add `.gitignore`.
+- [x] Add `.python-version`.
+- [x] Add `references/`.
+- [x] Add `src/appletv_mcp/`.
+- [x] Add `tests/`.
 
 ### 0.2 Pin runtime
 
-- [ ] Set `.python-version` to `3.14.7`.
-- [ ] Initialize project with `uv`.
-- [ ] Set `requires-python = ">=3.14,<3.15"`.
-- [ ] Add `pyatv==0.18.0`.
-- [ ] Add `mcp[cli]==2.2.0`.
-- [ ] Add `pydantic>=2.12,<3`.
-- [ ] Add `platformdirs`.
-- [ ] Add dev dependency `pytest`.
-- [ ] Add dev dependency `pytest-asyncio`.
-- [ ] Add dev dependency `ruff`.
-- [ ] Add dev dependency `pyright`.
-- [ ] Generate `uv.lock`.
-- [ ] Commit `uv.lock`.
+- [x] Set `.python-version` to `3.14.7`.
+- [x] Initialize project with `uv`.
+- [x] Set `requires-python = ">=3.14,<3.15"`.
+- [x] Add `pyatv==0.18.0`.
+- [x] Add `mcp[cli]==2.2.0`.
+- [x] Add `pydantic>=2.12,<3`.
+- [x] Add `platformdirs`.
+- [x] Add dev dependency `pytest`.
+- [x] Add dev dependency `pytest-asyncio`.
+- [x] Add dev dependency `ruff`.
+- [x] Add dev dependency `pyright`.
+- [x] Generate `uv.lock`.
+- [x] Commit `uv.lock`.
 
 ### 0.3 Configure quality tooling
 
-- [ ] Configure Ruff linting.
-- [ ] Configure Ruff formatting.
-- [ ] Configure Pyright.
-- [ ] Configure Pytest.
-- [ ] Add basic CI workflow.
-- [ ] Verify an empty/minimal project passes all quality gates.
+- [x] Configure Ruff linting.
+- [x] Configure Ruff formatting.
+- [x] Configure Pyright.
+- [x] Configure Pytest.
+- [x] Add basic CI workflow.
+- [x] Verify an empty/minimal project passes all quality gates.
 
 ### Exit criteria
 
-- [ ] `uv sync` succeeds from a clean checkout.
-- [ ] `uv run ruff check .` passes.
-- [ ] `uv run ruff format --check .` passes.
-- [ ] `uv run pyright` passes.
-- [ ] `uv run pytest` passes.
+- [x] `uv sync` succeeds from a clean checkout.
+- [x] `uv run ruff check .` passes.
+- [x] `uv run ruff format --check .` passes.
+- [x] `uv run pyright` passes.
+- [x] `uv run pytest` passes.
 
 ---
 
@@ -63,83 +128,83 @@ This phase has no Apple TV network dependency.
 
 Create normalized domain types for:
 
-- [ ] `PowerTarget`.
-- [ ] `PowerState`.
-- [ ] `FeatureAvailability`.
-- [ ] `RemoteButton`.
-- [ ] `PressAction`.
-- [ ] `PlaybackAction`.
-- [ ] `SkipDirection`.
-- [ ] `VolumeDirection`.
-- [ ] Playback state.
-- [ ] Media type.
-- [ ] Keyboard focus state.
+- [x] `PowerTarget`.
+- [x] `PowerState`.
+- [x] `FeatureAvailability`.
+- [x] `RemoteButton`.
+- [x] `PressAction`.
+- [x] `PlaybackAction`.
+- [x] `SkipDirection`.
+- [x] `VolumeDirection`.
+- [x] Playback state.
+- [x] Media type.
+- [x] Keyboard focus state.
 
 ### 1.2 Define configuration model
 
 Create `Settings` with:
 
-- [ ] `device_identifier`.
-- [ ] `device_name`.
-- [ ] `preferred_host`.
-- [ ] `scan_timeout_seconds`.
-- [ ] `command_timeout_seconds`.
+- [x] `device_identifier`.
+- [x] `device_name`.
+- [x] `preferred_host`.
+- [x] `scan_timeout_seconds`.
+- [x] `command_timeout_seconds`.
 
 Validation:
 
-- [ ] Positive timeouts.
-- [ ] Empty identifier rejected.
-- [ ] Host remains optional.
-- [ ] Device name remains optional/informational.
+- [x] Positive timeouts.
+- [x] Empty identifier rejected.
+- [x] Host remains optional.
+- [x] Device name remains optional/informational.
 
 ### 1.3 Define output models
 
 Create:
 
-- [ ] `DeviceInfo`.
-- [ ] `AppInfo`.
-- [ ] `PlaybackInfo`.
-- [ ] `AppleTVStatus`.
-- [ ] `AppleTVCapabilities`.
-- [ ] `PowerResult`.
-- [ ] `OpenAppResult`.
-- [ ] `OpenUrlResult`.
-- [ ] `PressResult`.
-- [ ] `PlaybackResult`.
-- [ ] `SeekResult`.
-- [ ] `SkipResult`.
-- [ ] `TextResult`.
-- [ ] `VolumeResult`.
-- [ ] `VolumeAdjustResult`.
+- [x] `DeviceInfo`.
+- [x] `AppInfo`.
+- [x] `PlaybackInfo`.
+- [x] `AppleTVStatus`.
+- [x] `AppleTVCapabilities`.
+- [x] `PowerResult`.
+- [x] `OpenAppResult`.
+- [x] `OpenUrlResult`.
+- [x] `PressResult`.
+- [x] `PlaybackResult`.
+- [x] `SeekResult`.
+- [x] `SkipResult`.
+- [x] `TextResult`.
+- [x] `VolumeResult`.
+- [x] `VolumeAdjustResult`.
 
 ### 1.4 Define internal exceptions
 
 Create internal exception types only where they improve translation clarity, for example:
 
-- [ ] `DeviceNotConfiguredError`.
-- [ ] `DeviceNotFoundError`.
-- [ ] `DeviceConnectionError`.
-- [ ] `FeatureUnavailableError`.
-- [ ] `FeatureUnsupportedError`.
-- [ ] `AmbiguousAppError`.
-- [ ] `AppNotFoundError`.
-- [ ] `UncertainExecutionError`.
+- [x] `DeviceNotConfiguredError`.
+- [x] `DeviceNotFoundError`.
+- [x] `DeviceConnectionError`.
+- [x] `FeatureUnavailableError`.
+- [x] `FeatureUnsupportedError`.
+- [x] `AmbiguousAppError`.
+- [x] `AppNotFoundError`.
+- [x] `UncertainExecutionError`.
 
 Do not recreate upstream exception hierarchies unnecessarily.
 
 ### 1.5 Tests
 
-- [ ] Test Settings validation.
-- [ ] Test enum serialization.
-- [ ] Test output-model serialization.
-- [ ] Test optional fields.
-- [ ] Test field constraints.
+- [x] Test Settings validation.
+- [x] Test enum serialization.
+- [x] Test output-model serialization.
+- [x] Test optional fields.
+- [x] Test field constraints.
 
 ### Exit criteria
 
-- [ ] Models are independent of MCP.
-- [ ] Models are independent of live `pyatv` connections.
-- [ ] All model tests pass.
+- [x] Models are independent of MCP.
+- [x] Models are independent of live `pyatv` connections.
+- [x] All model tests pass.
 
 ---
 
@@ -149,38 +214,38 @@ Depends on Phase 1.
 
 ### 2.1 Determine config location
 
-- [ ] Use `platformdirs`.
-- [ ] Define application name consistently.
-- [ ] Define config filename.
-- [ ] Make config location overridable in tests.
+- [x] Use `platformdirs`.
+- [x] Define application name consistently.
+- [x] Define config filename.
+- [x] Make config location overridable in tests.
 
 ### 2.2 Implement configuration repository
 
 Implement:
 
-- [ ] `load_settings()`.
-- [ ] `save_settings()`.
-- [ ] Atomic write strategy.
-- [ ] Helpful error for missing config.
-- [ ] Helpful error for malformed config.
+- [x] `load_settings()`.
+- [x] `save_settings()`.
+- [x] Atomic write strategy.
+- [x] Helpful error for missing config.
+- [x] Helpful error for malformed config.
 
 ### 2.3 Safety
 
-- [ ] Do not put `pyatv` credentials into this config.
-- [ ] Do not copy raw `pyatv` storage into this config.
-- [ ] Ensure logs do not dump entire config objects if future secret fields are added.
+- [x] Do not put `pyatv` credentials into this config.
+- [x] Do not copy raw `pyatv` storage into this config.
+- [x] Ensure logs do not dump entire config objects if future secret fields are added.
 
 ### 2.4 Tests
 
-- [ ] Round-trip save/load.
-- [ ] Missing file.
-- [ ] Invalid JSON.
-- [ ] Invalid settings.
-- [ ] Atomic replacement behavior where practical.
+- [x] Round-trip save/load.
+- [x] Missing file.
+- [x] Invalid JSON.
+- [x] Invalid settings.
+- [x] Atomic replacement behavior where practical.
 
 ### Exit criteria
 
-- [ ] Device profile persistence works independently of `pyatv` credentials.
+- [x] Device profile persistence works independently of `pyatv` credentials.
 
 ---
 
@@ -192,35 +257,35 @@ Depends on Phase 0.
 
 Using the pinned `pyatv 0.18.0` references:
 
-- [ ] Confirm exact `FileStorage` construction API.
-- [ ] Confirm default storage path behavior.
-- [ ] Confirm required async load/save lifecycle.
-- [ ] Confirm compatibility with `atvremote` credentials.
+- [x] Confirm exact `FileStorage` construction API.
+- [x] Confirm default storage path behavior.
+- [x] Confirm required async load/save lifecycle.
+- [x] Confirm compatibility with `atvremote` credentials.
 
 ### 3.2 Implement storage helper
 
 Create a small adapter that:
 
-- [ ] Creates/opens persistent `pyatv` storage.
-- [ ] Loads it once during application lifespan.
-- [ ] Exposes it to `ConnectionManager`.
-- [ ] Closes/saves only as required by pinned API behavior.
+- [x] Creates/opens persistent `pyatv` storage.
+- [x] Loads it once during application lifespan.
+- [x] Exposes it to `ConnectionManager`.
+- [x] Closes/saves only as required by pinned API behavior.
 
 ### 3.3 Logging
 
-- [ ] Never log raw credentials.
-- [ ] Never log raw storage objects.
-- [ ] Never serialize storage into MCP results.
+- [x] Never log raw credentials.
+- [x] Never log raw storage objects.
+- [x] Never serialize storage into MCP results.
 
 ### 3.4 Tests
 
-- [ ] Mock storage load.
-- [ ] Mock load failure.
-- [ ] Verify storage object reaches connection layer.
+- [x] Mock storage load.
+- [x] Mock load failure.
+- [x] Verify storage object reaches connection layer.
 
 ### Exit criteria
 
-- [ ] Credentials can be loaded without involving MCP tools.
+- [x] Credentials can be loaded without involving MCP tools.
 
 ---
 
@@ -238,49 +303,51 @@ Implement:
 class ConnectionManager:
     async def get(self) -> AppleTV: ...
     async def reconnect(self) -> AppleTV: ...
+    async def disconnect(self) -> None: ...
     async def close(self) -> None: ...
     def invalidate(self) -> None: ...
 ```
 
 ### 4.2 Implement preferred-host discovery
 
-- [ ] If `preferred_host` exists, perform unicast scan.
-- [ ] Verify returned device stable identifier.
-- [ ] Reject a different Apple TV found at the old IP.
-- [ ] Use stored credentials/configuration during connection.
+- [x] If `preferred_host` exists, perform unicast scan.
+- [x] Verify returned device stable identifier.
+- [x] Reject a different Apple TV found at the old IP.
+- [x] Use stored credentials/configuration during connection.
 
 ### 4.3 Implement identifier fallback discovery
 
-- [ ] Fall back to multicast scan when preferred-host resolution fails.
-- [ ] Filter/select by configured stable identifier.
-- [ ] Fail clearly when the configured device is not found.
-- [ ] Update `preferred_host` when the correct device is rediscovered elsewhere.
-- [ ] Persist updated host.
+- [x] Fall back to multicast scan when preferred-host resolution fails.
+- [x] Filter/select by configured stable identifier.
+- [x] Fail clearly when the configured device is not found.
+- [x] Update `preferred_host` when the correct device is rediscovered elsewhere.
+- [x] Persist updated host.
 
 ### 4.4 Implement connection caching
 
-- [ ] Cache one live Apple TV connection.
-- [ ] Reuse it across controller calls.
-- [ ] Do not reconnect on every MCP tool call.
+- [x] Cache one live Apple TV connection.
+- [x] Reuse it across controller calls.
+- [x] Do not reconnect on every MCP tool call.
 
 ### 4.5 Implement concurrency
 
-- [ ] Add async connection lock.
-- [ ] Collapse simultaneous `get()` calls into one discovery/connect operation.
-- [ ] Prevent duplicate connections during reconnect.
+- [x] Add async connection lock.
+- [x] Collapse simultaneous `get()` calls into one discovery/connect operation.
+- [x] Prevent duplicate connections during reconnect.
 
 ### 4.6 Implement invalidation
 
-- [ ] Invalidate cached connection on disconnect callback.
-- [ ] Invalidate cached connection on known broken-connection failures.
-- [ ] Preserve persistent credentials.
-- [ ] Preserve device profile.
+- [x] Invalidate cached connection on disconnect callback.
+- [x] Invalidate cached connection on known broken-connection failures.
+- [x] Mark the cached session stale without dropping ownership; close the retained handle on reconnect, disconnect, get, or close.
+- [x] Preserve persistent credentials.
+- [x] Preserve device profile.
 
 ### 4.7 Implement close
 
-- [ ] Close active connection cleanly.
-- [ ] Make repeated `close()` safe.
-- [ ] Prevent new connection use during shutdown if practical.
+- [x] Close active connection cleanly.
+- [x] Make repeated `close()` safe.
+- [x] Prevent new connection use during shutdown if practical.
 
 ### 4.8 Unit tests
 
@@ -288,23 +355,23 @@ Mock all `pyatv` network calls.
 
 Test:
 
-- [ ] Cached reuse.
-- [ ] Preferred-host success.
-- [ ] Preferred-host wrong-device rejection.
-- [ ] Preferred-host failure followed by multicast success.
-- [ ] Configured identifier not found.
-- [ ] Preferred-host update after rediscovery.
-- [ ] Concurrent `get()` calls.
-- [ ] Explicit reconnect.
-- [ ] Invalidation.
-- [ ] Close.
-- [ ] Connection failure translation.
+- [x] Cached reuse.
+- [x] Preferred-host success.
+- [x] Preferred-host wrong-device rejection.
+- [x] Preferred-host failure followed by multicast success.
+- [x] Configured identifier not found.
+- [x] Preferred-host update after rediscovery.
+- [x] Concurrent `get()` calls.
+- [x] Explicit reconnect.
+- [x] Invalidation retains the connection until reconnect/disconnect/close.
+- [x] Close.
+- [x] Connection failure translation.
 
 ### Exit criteria
 
-- [ ] One configured device can be discovered and connected by stable identifier.
-- [ ] IP changes are recoverable without reconfiguration.
-- [ ] No MCP code is required to use the connection manager.
+- [x] One configured device can be discovered and connected by stable identifier.
+- [x] IP changes are recoverable without reconfiguration.
+- [x] No MCP code is required to use the connection manager.
 
 ---
 
@@ -318,29 +385,29 @@ From the pinned source/docs, map normalized operations to exact `FeatureName` me
 
 Required coverage:
 
-- [ ] Turn on.
-- [ ] Turn off.
-- [ ] App list.
-- [ ] App launch.
-- [ ] Up.
-- [ ] Down.
-- [ ] Left.
-- [ ] Right.
-- [ ] Select.
-- [ ] Menu/back.
-- [ ] Home.
-- [ ] Play.
-- [ ] Pause.
-- [ ] Play/pause.
-- [ ] Stop.
-- [ ] Next.
-- [ ] Previous.
-- [ ] Set position.
-- [ ] Skip forward.
-- [ ] Skip backward.
-- [ ] Text get/set where applicable.
-- [ ] Keyboard focus where applicable.
-- [ ] Volume get/set/up/down where applicable.
+- [x] Turn on.
+- [x] Turn off.
+- [x] App list.
+- [x] App launch.
+- [x] Up.
+- [x] Down.
+- [x] Left.
+- [x] Right.
+- [x] Select.
+- [x] Menu/back.
+- [x] Home.
+- [x] Play.
+- [x] Pause.
+- [x] Play/pause.
+- [x] Stop.
+- [x] Next.
+- [x] Previous.
+- [x] Set position.
+- [x] Skip forward.
+- [x] Skip backward.
+- [x] Text get/set where applicable.
+- [x] Keyboard focus where applicable.
+- [x] Volume get/set/up/down where applicable.
 
 ### 5.2 Centralize mapping
 
@@ -365,28 +432,28 @@ unsupported
 
 ### 5.4 Implement helpers
 
-- [ ] `feature_state(operation)`.
-- [ ] `require_feature(operation)`.
-- [ ] `normalized_capabilities()`.
+- [x] `feature_state(operation)`.
+- [x] `require_feature(operation)`.
+- [x] `normalized_capabilities()`.
 
 Behavior:
 
-- [ ] Available → execute.
-- [ ] Unknown → permit attempt.
-- [ ] Unavailable → expected operational failure.
-- [ ] Unsupported → expected device-capability failure.
+- [x] Available → execute.
+- [x] Unknown → permit attempt.
+- [x] Unavailable → expected operational failure.
+- [x] Unsupported → expected device-capability failure.
 
 ### 5.5 Tests
 
-- [ ] Every public MCP operation has expected feature mapping where relevant.
-- [ ] Unknown behavior.
-- [ ] Unavailable behavior.
-- [ ] Unsupported behavior.
-- [ ] Capability output normalization.
+- [x] Every public MCP operation has expected feature mapping where relevant.
+- [x] Unknown behavior.
+- [x] Unavailable behavior.
+- [x] Unsupported behavior.
+- [x] Capability output normalization.
 
 ### Exit criteria
 
-- [ ] No controller operation needs to understand raw feature-state semantics itself.
+- [x] No controller operation needs to understand raw feature-state semantics itself.
 
 ---
 
@@ -400,58 +467,58 @@ Implement read-only functionality first because it is easiest to test and safest
 
 Normalize:
 
-- [ ] Connection/device identity.
-- [ ] Power state.
-- [ ] Playback state.
-- [ ] Media metadata.
-- [ ] `media_app`.
-- [ ] Position.
-- [ ] Duration.
-- [ ] Repeat.
-- [ ] Shuffle.
-- [ ] Volume.
-- [ ] Keyboard focus.
+- [x] Connection/device identity.
+- [x] Power state.
+- [x] Playback state.
+- [x] Media metadata.
+- [x] `media_app`.
+- [x] Position.
+- [x] Duration.
+- [x] Repeat.
+- [x] Shuffle.
+- [x] Volume.
+- [x] Keyboard focus.
 
 Critical semantic rule:
 
-- [ ] Name the field `media_app`.
-- [ ] Do not call it `active_app`.
-- [ ] Do not imply foreground-app certainty.
+- [x] Name the field `media_app`.
+- [x] Do not call it `active_app`.
+- [x] Do not imply foreground-app certainty.
 
 ### 6.2 `capabilities()`
 
-- [ ] Return normalized controller operations.
-- [ ] Do not expose raw `FeatureName` enum values.
+- [x] Return normalized controller operations.
+- [x] Do not expose raw `FeatureName` enum values.
 
 ### 6.3 `list_apps()`
 
-- [ ] Return typed `AppInfo`.
-- [ ] Optional case-insensitive filtering by name.
-- [ ] Optional case-insensitive filtering by bundle ID.
-- [ ] No fuzzy auto-selection.
+- [x] Return typed `AppInfo`.
+- [x] Optional case-insensitive filtering by name.
+- [x] Optional case-insensitive filtering by bundle ID.
+- [x] No fuzzy auto-selection.
 
 ### 6.4 Read retry policy
 
-- [ ] Broken cached connection may reconnect and retry once.
-- [ ] Do not loop indefinitely.
-- [ ] Convert final failures into domain-level errors.
+- [x] Broken cached connection may reconnect and retry once.
+- [x] Do not loop indefinitely.
+- [x] Convert final failures into domain-level errors.
 
 ### 6.5 Tests
 
-- [ ] Full status normalization.
-- [ ] Missing metadata.
-- [ ] Unknown power.
-- [ ] No media app.
-- [ ] No volume support.
-- [ ] Keyboard focus unavailable.
-- [ ] Capability normalization.
-- [ ] App filtering.
-- [ ] Read retry success.
-- [ ] Read retry exhaustion.
+- [x] Full status normalization.
+- [x] Missing metadata.
+- [x] Unknown power.
+- [x] No media app.
+- [x] No volume support.
+- [x] Keyboard focus unavailable.
+- [x] Capability normalization.
+- [x] App filtering.
+- [x] Read retry success.
+- [x] Read retry exhaustion.
 
 ### Exit criteria
 
-- [ ] The project can report meaningful device state without MCP.
+- [x] The project can report meaningful device state without MCP.
 
 ---
 
@@ -463,20 +530,20 @@ Add a controller command lock before write actions.
 
 ### 7.1 Command serialization
 
-- [ ] Add async command lock.
-- [ ] Ensure action methods execute serially.
-- [ ] Keep status reads outside the lock unless required by upstream behavior.
+- [x] Add async command lock.
+- [x] Ensure action methods execute serially.
+- [x] Keep status reads outside the lock unless required by upstream behavior.
 
 ### 7.2 Power
 
 Implement:
 
-- [ ] `power("on")`.
-- [ ] `power("off")`.
-- [ ] Feature checks.
-- [ ] Optional state verification.
-- [ ] Bounded wait.
-- [ ] Idempotent retry rules.
+- [x] `power("on")`.
+- [x] `power("off")`.
+- [x] Feature checks.
+- [x] Optional state verification.
+- [x] Bounded wait.
+- [x] Idempotent retry rules.
 
 ### 7.3 Open app
 
@@ -491,57 +558,57 @@ Implement deterministic resolution:
 
 Then:
 
-- [ ] Launch resolved bundle ID.
-- [ ] Return `OpenAppResult`.
+- [x] Launch resolved bundle ID.
+- [x] Return `OpenAppResult`.
 
 ### 7.4 Open URL
 
-- [ ] Accept URL string.
-- [ ] Invoke `apps.launch_app(url)` as supported by pinned API.
-- [ ] Return acceptance only.
-- [ ] Do not claim content success.
+- [x] Accept URL string.
+- [x] Invoke `apps.launch_app(url)` as supported by pinned API.
+- [x] Return acceptance only.
+- [x] Do not claim content success.
 
 ### 7.5 Absolute seek
 
-- [ ] Validate position >= 0.
-- [ ] Feature gate.
-- [ ] Invoke set-position API.
-- [ ] Safe reconnect/retry only when semantics remain certain.
+- [x] Validate position >= 0.
+- [x] Feature gate.
+- [x] Invoke set-position API.
+- [x] Safe reconnect/retry only when semantics remain certain.
 
 ### 7.6 Absolute volume
 
-- [ ] Validate 0–100.
-- [ ] Feature gate.
-- [ ] Set volume.
-- [ ] Read back current volume where feasible.
-- [ ] Return requested and observed values.
+- [x] Validate 0–100.
+- [x] Feature gate.
+- [x] Set volume.
+- [x] Read back current volume where feasible.
+- [x] Return requested and observed values.
 
 ### 7.7 Set text
 
-- [ ] Feature gate.
-- [ ] Prefer keyboard text-set API.
-- [ ] Permit empty string to clear field.
-- [ ] Never log input text.
-- [ ] Return only character count and acceptance.
+- [x] Feature gate.
+- [x] Prefer keyboard text-set API.
+- [x] Permit empty string to clear field.
+- [x] Never log input text.
+- [x] Return only character count and acceptance.
 
 ### 7.8 Tests
 
-- [ ] Power on/off.
-- [ ] App bundle-ID resolution.
-- [ ] App exact-name resolution.
-- [ ] App ambiguity.
-- [ ] App missing with candidates.
-- [ ] URL launch.
-- [ ] Seek.
-- [ ] Volume set.
-- [ ] Text set.
-- [ ] Empty text.
-- [ ] Text never appears in logs.
-- [ ] Command serialization.
+- [x] Power on/off.
+- [x] App bundle-ID resolution.
+- [x] App exact-name resolution.
+- [x] App ambiguity.
+- [x] App missing with candidates.
+- [x] URL launch.
+- [x] Seek.
+- [x] Volume set.
+- [x] Text set.
+- [x] Empty text.
+- [x] Text never appears in logs.
+- [x] Command serialization.
 
 ### Exit criteria
 
-- [ ] Semantic write actions work through controller without MCP.
+- [x] Semantic write actions work through controller without MCP.
 
 ---
 
@@ -553,87 +620,87 @@ Depends on Phase 7.
 
 Support:
 
-- [ ] up.
-- [ ] down.
-- [ ] left.
-- [ ] right.
-- [ ] select.
-- [ ] back.
-- [ ] home.
+- [x] up.
+- [x] down.
+- [x] left.
+- [x] right.
+- [x] select.
+- [x] back.
+- [x] home.
 
 Support action styles:
 
-- [ ] tap.
-- [ ] double tap.
-- [ ] hold.
+- [x] tap.
+- [x] double tap.
+- [x] hold.
 
 Support:
 
-- [ ] count 1–10.
-- [ ] sequential execution.
-- [ ] completed-count reporting.
+- [x] count 1–10.
+- [x] sequential execution.
+- [x] completed-count reporting.
 
 Confirm exact pinned `pyatv` APIs for press behavior before implementation.
 
 ### 8.2 Back mapping
 
-- [ ] Map MCP `back` to the correct `pyatv` menu/back operation for 0.18.0.
-- [ ] Do not expose `menu` to the MCP user unless later desired.
+- [x] Map MCP `back` to the correct `pyatv` menu/back operation for 0.18.0.
+- [x] Do not expose `menu` to the MCP user unless later desired.
 
 ### 8.3 Playback
 
 Support:
 
-- [ ] play.
-- [ ] pause.
-- [ ] toggle.
-- [ ] stop.
-- [ ] next.
-- [ ] previous.
+- [x] play.
+- [x] pause.
+- [x] toggle.
+- [x] stop.
+- [x] next.
+- [x] previous.
 
 ### 8.4 Relative skip
 
 Support:
 
-- [ ] forward.
-- [ ] backward.
-- [ ] optional seconds.
-- [ ] seconds=0 default-device interval semantics.
+- [x] forward.
+- [x] backward.
+- [x] optional seconds.
+- [x] seconds=0 default-device interval semantics.
 
 ### 8.5 Relative volume
 
 Support:
 
-- [ ] up.
-- [ ] down.
-- [ ] steps 1–10.
-- [ ] completed-step count.
+- [x] up.
+- [x] down.
+- [x] steps 1–10.
+- [x] completed-step count.
 
 ### 8.6 Uncertain execution handling
 
 For every non-idempotent operation:
 
-- [ ] Do not automatically replay after uncertain transport failure.
-- [ ] Invalidate broken connection.
-- [ ] Return an error explaining execution may have occurred.
-- [ ] Let a later independent call reconnect.
+- [x] Do not automatically replay after uncertain transport failure.
+- [x] Invalidate broken connection.
+- [x] Return an error explaining execution may have occurred.
+- [x] Let a later independent call reconnect.
 
 ### 8.7 Tests
 
-- [ ] Every button maps correctly.
-- [ ] Tap behavior.
-- [ ] Double tap behavior.
-- [ ] Hold behavior.
-- [ ] Count sequencing.
-- [ ] Partial completion.
-- [ ] Playback mappings.
-- [ ] Skip mappings.
-- [ ] Relative volume.
-- [ ] No automatic replay after uncertain failure.
+- [x] Every button maps correctly.
+- [x] Tap behavior.
+- [x] Double tap behavior.
+- [x] Hold behavior.
+- [x] Count sequencing.
+- [x] Partial completion.
+- [x] Playback mappings.
+- [x] Skip mappings.
+- [x] Relative volume.
+- [x] No automatic replay after uncertain failure.
 
 ### Exit criteria
 
-- [ ] Blind controls are available but handled more conservatively than semantic/idempotent controls.
+- [x] Blind controls are available but handled more conservatively than semantic/idempotent controls.
 
 ---
 
@@ -647,42 +714,42 @@ Map expected `pyatv` failures into clear controller/domain errors.
 
 Cover:
 
-- [ ] Device unavailable.
-- [ ] Connection lost.
-- [ ] Authentication/pairing unavailable.
-- [ ] Feature unsupported.
-- [ ] Feature temporarily unavailable.
-- [ ] Timeout.
-- [ ] App not found.
-- [ ] Ambiguous app.
-- [ ] Uncertain non-idempotent execution.
+- [x] Device unavailable.
+- [x] Connection lost.
+- [x] Authentication/pairing unavailable.
+- [x] Feature unsupported.
+- [x] Feature temporarily unavailable.
+- [x] Timeout.
+- [x] App not found.
+- [x] Ambiguous app.
+- [x] Uncertain non-idempotent execution.
 
 ### 9.2 Preserve safe context
 
 Error messages may include:
 
-- [ ] Operation name.
-- [ ] Device display name.
-- [ ] Requested app name.
-- [ ] Capability state.
+- [x] Operation name.
+- [x] Device display name.
+- [x] Requested app name.
+- [x] Capability state.
 
 Error messages must not include:
 
-- [ ] Credentials.
-- [ ] Passwords.
-- [ ] Raw credential objects.
-- [ ] Raw storage serialization.
-- [ ] Keyboard text.
+- [x] Credentials.
+- [x] Passwords.
+- [x] Raw credential objects.
+- [x] Raw storage serialization.
+- [x] Keyboard text.
 
 ### 9.3 Tests
 
-- [ ] Every expected failure becomes a deterministic domain error.
-- [ ] Unexpected failures remain unexpected and retain traceback in logs.
-- [ ] Secret-bearing values are absent from expected error strings.
+- [x] Every expected failure becomes a deterministic domain error.
+- [x] Unexpected failures remain unexpected and retain traceback in logs.
+- [x] Secret-bearing values are absent from expected error strings.
 
 ### Exit criteria
 
-- [ ] MCP layer will not need to understand `pyatv` exception types.
+- [x] MCP layer will not need to understand `pyatv` exception types.
 
 ---
 
@@ -702,45 +769,45 @@ class AppContext:
 
 Startup:
 
-- [ ] Load settings.
-- [ ] Load `pyatv` storage.
-- [ ] Create `ConnectionManager`.
-- [ ] Create `AppleTVController`.
-- [ ] Do not connect to Apple TV.
+- [x] Load settings.
+- [x] Load `pyatv` storage.
+- [x] Create `ConnectionManager`.
+- [x] Create `AppleTVController`.
+- [x] Do not connect to Apple TV.
 
 Shutdown:
 
-- [ ] Close connection manager.
-- [ ] Clean up storage if required.
+- [x] Close connection manager.
+- [x] Clean up storage if required.
 
 ### 10.2 Server
 
 Create explicitly:
 
-- [ ] Name `agenai-appletv`.
-- [ ] Version `0.1.0`.
-- [ ] Lifespan.
-- [ ] Server instructions.
-- [ ] Default stdio execution path.
+- [x] Name `appletv-mcp`.
+- [x] Version `0.1.0`.
+- [x] Lifespan.
+- [x] Server instructions.
+- [x] Default stdio execution path.
 
 ### 10.3 Logging
 
-- [ ] Use Python `logging`.
-- [ ] No `print()` in serving path.
-- [ ] Default app logger INFO.
-- [ ] Default `pyatv` logger WARNING.
-- [ ] Optional debug mode.
+- [x] Use Python `logging`.
+- [x] No `print()` in serving path.
+- [x] Default app logger INFO.
+- [x] Default `pyatv` logger WARNING.
+- [x] Optional debug mode.
 
 ### 10.4 Tests
 
-- [ ] Server can instantiate with mocked dependencies.
-- [ ] MCP server startup does not connect to Apple TV.
-- [ ] MCP server startup succeeds while device mock is unavailable.
-- [ ] Shutdown closes connection manager.
+- [x] Server can instantiate with mocked dependencies.
+- [x] MCP server startup does not connect to Apple TV.
+- [x] MCP server startup succeeds while device mock is unavailable.
+- [x] Shutdown closes connection manager.
 
 ### Exit criteria
 
-- [ ] MCP process lifecycle is independent of Apple TV availability.
+- [x] MCP process lifecycle is independent of Apple TV availability.
 
 ---
 
@@ -752,33 +819,33 @@ Implement thin MCP wrappers only.
 
 ### 11.1 `apple_tv_status`
 
-- [ ] No user input.
-- [ ] Return `AppleTVStatus`.
-- [ ] `read_only_hint=True`.
-- [ ] `open_world_hint=False`.
+- [x] No user input.
+- [x] Return `AppleTVStatus`.
+- [x] `read_only_hint=True`.
+- [x] `open_world_hint=False`.
 
 ### 11.2 `apple_tv_capabilities`
 
-- [ ] No user input.
-- [ ] Return `AppleTVCapabilities`.
-- [ ] `read_only_hint=True`.
-- [ ] `open_world_hint=False`.
+- [x] No user input.
+- [x] Return `AppleTVCapabilities`.
+- [x] `read_only_hint=True`.
+- [x] `open_world_hint=False`.
 
 ### 11.3 `apple_tv_list_apps`
 
-- [ ] Optional `query`.
-- [ ] Return typed app list.
-- [ ] `read_only_hint=True`.
-- [ ] `open_world_hint=False`.
+- [x] Optional `query`.
+- [x] Return typed app list.
+- [x] `read_only_hint=True`.
+- [x] `open_world_hint=False`.
 
 ### 11.4 MCP error conversion
 
-- [ ] Expected domain/controller errors become `ToolError`.
-- [ ] Do not return error strings as successful tool results.
+- [x] Expected domain/controller errors become `ToolError`.
+- [x] Do not return error strings as successful tool results.
 
 ### Exit criteria
 
-- [ ] Read-only tools work via MCP in-memory client.
+- [x] Read-only tools work via MCP in-memory client.
 
 ---
 
@@ -790,46 +857,47 @@ Implement:
 
 ### 12.1 `apple_tv_power`
 
-- [ ] Typed `state`.
-- [ ] Typed result.
-- [ ] `idempotent_hint=True`.
-- [ ] `destructive_hint=False`.
-- [ ] `open_world_hint=False`.
+- [x] Typed `state`.
+- [x] Typed result.
+- [x] `idempotent_hint=False` (annotations cannot split ON vs OFF; clients may treat `true` as retry-safe).
+- [x] `destructive_hint=False`.
+- [x] `open_world_hint=False`.
 
 ### 12.2 `apple_tv_open_app`
 
-- [ ] Typed `app`.
-- [ ] Typed result.
-- [ ] Exact-match semantics documented in tool docstring.
+- [x] Typed `app`.
+- [x] Typed result.
+- [x] Exact-match semantics documented in tool docstring.
 
 ### 12.3 `apple_tv_open_url`
 
-- [ ] Typed `url`.
-- [ ] Typed result.
-- [ ] Tool description avoids claiming visual verification.
+- [x] Typed `url`.
+- [x] Typed result.
+- [x] Tool description avoids claiming visual verification.
+- [x] `idempotent_hint=False` (deep links are not retried after uncertain delivery).
 
 ### 12.4 `apple_tv_seek`
 
-- [ ] `position_seconds >= 0`.
-- [ ] Typed result.
-- [ ] `idempotent_hint=True`.
+- [x] `position_seconds >= 0`.
+- [x] Typed result.
+- [x] `idempotent_hint=True`.
 
 ### 12.5 `apple_tv_set_text`
 
-- [ ] Typed text.
-- [ ] Typed result.
-- [ ] `idempotent_hint=True`.
-- [ ] Description states focused text field requirement.
+- [x] Typed text.
+- [x] Typed result.
+- [x] `idempotent_hint=True`.
+- [x] Description states focused text field requirement.
 
 ### 12.6 `apple_tv_set_volume`
 
-- [ ] 0–100 constraint.
-- [ ] Typed result.
-- [ ] `idempotent_hint=True`.
+- [x] 0–100 constraint.
+- [x] Typed result.
+- [x] `idempotent_hint=True`.
 
 ### Exit criteria
 
-- [ ] Semantic action tools expose only normalized domain concepts.
+- [x] Semantic action tools expose only normalized domain concepts.
 
 ---
 
@@ -839,35 +907,35 @@ Depends on Phase 12.
 
 ### 13.1 `apple_tv_press`
 
-- [ ] Button enum.
-- [ ] Action enum.
-- [ ] Count range 1–10.
-- [ ] Structured result.
-- [ ] `idempotent_hint=False`.
-- [ ] Description explicitly states blind navigation.
+- [x] Button enum.
+- [x] Action enum.
+- [x] Count range 1–10.
+- [x] Structured result.
+- [x] `idempotent_hint=False`.
+- [x] Description explicitly states blind navigation.
 
 ### 13.2 `apple_tv_playback`
 
-- [ ] Action enum.
-- [ ] Structured result.
-- [ ] Treat toggle as non-idempotent.
+- [x] Action enum.
+- [x] Structured result.
+- [x] Treat toggle as non-idempotent.
 
 ### 13.3 `apple_tv_skip`
 
-- [ ] Direction enum.
-- [ ] Seconds >= 0.
-- [ ] Structured result.
+- [x] Direction enum.
+- [x] Seconds >= 0.
+- [x] Structured result.
 
 ### 13.4 `apple_tv_adjust_volume`
 
-- [ ] Direction enum.
-- [ ] Steps range 1–10.
-- [ ] Structured result.
-- [ ] `idempotent_hint=False`.
+- [x] Direction enum.
+- [x] Steps range 1–10.
+- [x] Structured result.
+- [x] `idempotent_hint=False`.
 
 ### Exit criteria
 
-- [ ] Agent has fallback control surface without raw `pyatv` concepts.
+- [x] Agent has fallback control surface without raw `pyatv` concepts.
 
 ---
 
@@ -881,44 +949,44 @@ Use the MCP SDK in-memory client.
 
 Assert exact v0.1 tool set:
 
-- [ ] `apple_tv_status`.
-- [ ] `apple_tv_capabilities`.
-- [ ] `apple_tv_list_apps`.
-- [ ] `apple_tv_power`.
-- [ ] `apple_tv_open_app`.
-- [ ] `apple_tv_open_url`.
-- [ ] `apple_tv_press`.
-- [ ] `apple_tv_playback`.
-- [ ] `apple_tv_seek`.
-- [ ] `apple_tv_skip`.
-- [ ] `apple_tv_set_text`.
-- [ ] `apple_tv_set_volume`.
-- [ ] `apple_tv_adjust_volume`.
+- [x] `apple_tv_status`.
+- [x] `apple_tv_capabilities`.
+- [x] `apple_tv_list_apps`.
+- [x] `apple_tv_power`.
+- [x] `apple_tv_open_app`.
+- [x] `apple_tv_open_url`.
+- [x] `apple_tv_press`.
+- [x] `apple_tv_playback`.
+- [x] `apple_tv_seek`.
+- [x] `apple_tv_skip`.
+- [x] `apple_tv_set_text`.
+- [x] `apple_tv_set_volume`.
+- [x] `apple_tv_adjust_volume`.
 
 ### 14.2 Schema assertions
 
 For every tool:
 
-- [ ] Tool name.
-- [ ] Description.
-- [ ] Required arguments.
-- [ ] Optional arguments.
-- [ ] Enum values.
-- [ ] Numeric bounds.
-- [ ] Output schema.
-- [ ] Tool annotations.
+- [x] Tool name.
+- [x] Description.
+- [x] Required arguments.
+- [x] Optional arguments.
+- [x] Enum values.
+- [x] Numeric bounds.
+- [x] Output schema.
+- [x] Tool annotations.
 
 ### 14.3 Behavior assertions
 
-- [ ] Structured content returned.
-- [ ] Expected controller failures become `is_error=True` tool results.
-- [ ] Invalid MCP input is rejected before controller execution.
-- [ ] Server can be tested without subprocess.
-- [ ] Server can be tested without physical Apple TV.
+- [x] Structured content returned.
+- [x] Expected controller failures become `is_error=True` tool results.
+- [x] Invalid MCP input is rejected before controller execution.
+- [x] Server can be tested without subprocess.
+- [x] Server can be tested without physical Apple TV.
 
 ### Exit criteria
 
-- [ ] MCP contract is stable and independently testable.
+- [x] MCP contract is stable and independently testable.
 
 ---
 
@@ -930,38 +998,41 @@ Can be implemented earlier after Phase 5, but should be complete before live-dev
 
 ### 15.1 Device discovery
 
-- [ ] Load persistent `pyatv` credentials.
-- [ ] Scan devices.
-- [ ] Present discovered candidates.
-- [ ] Show name.
-- [ ] Show stable identifier.
-- [ ] Show host.
+- [x] Load persistent `pyatv` credentials.
+- [x] Scan devices.
+- [x] Present discovered candidates.
+- [x] Show name.
+- [x] Show stable identifier.
+- [x] Show host.
 
 ### 15.2 Selection
 
-- [ ] Select one Apple TV.
-- [ ] Persist stable identifier.
-- [ ] Persist display name.
-- [ ] Persist preferred host.
+- [x] Select one Apple TV.
+- [x] Persist stable identifier.
+- [x] Persist display name.
+- [x] Persist preferred host.
 
 ### 15.3 Verification
 
-- [ ] Connect using stored credentials.
-- [ ] Verify device identity.
-- [ ] Display normalized capabilities.
-- [ ] Close cleanly.
+- [x] Connect using stored credentials.
+- [x] Verify device identity.
+- [x] Display normalized capabilities.
+- [x] Close cleanly.
 
 ### 15.4 Failure behavior
 
-- [ ] No credentials found.
-- [ ] Pairing required.
-- [ ] Device disappears.
-- [ ] Connection rejected.
-- [ ] Invalid selection.
+- [x] No credentials found.
+- [x] Pairing required.
+- [x] Device disappears.
+- [x] Connection rejected.
+- [x] Invalid selection.
+- [x] Invalid `--scan-timeout` rejected at argparse (positive finite).
+- [x] Expected Apple TV errors become one-line CLI errors.
+- [x] Storage adapter closed if configure exits before Runtime ownership.
 
 ### Exit criteria
 
-- [ ] A user can configure the MCP server without editing JSON manually.
+- [x] A user can configure the MCP server without editing JSON manually.
 
 ---
 
@@ -973,30 +1044,31 @@ Depends on Phases 6–9 and Phase 15.
 
 Implement non-destructive checks for:
 
-- [ ] Configuration exists.
-- [ ] Configuration validates.
-- [ ] `pyatv` storage loads.
-- [ ] Configured identifier can be discovered.
-- [ ] Preferred host matches or can be repaired.
-- [ ] Connection succeeds.
-- [ ] Power capability.
-- [ ] App listing/launch capability.
-- [ ] Navigation capabilities.
-- [ ] Playback capabilities.
-- [ ] Keyboard capability/current state.
-- [ ] Volume capability.
+- [x] Configuration exists.
+- [x] Configuration validates.
+- [x] `pyatv` storage loads.
+- [x] Configured identifier can be discovered.
+- [x] Discovery reuses the production resolver (preferred-host unicast, then identifier fallback).
+- [x] Preferred host matches or can be repaired.
+- [x] Connection succeeds.
+- [x] Power capability.
+- [x] App listing/launch capability.
+- [x] Navigation capabilities.
+- [x] Playback capabilities.
+- [x] Keyboard capability/current state.
+- [x] Volume capability.
 
 ### 16.2 Output
 
-- [ ] Screen-reader-friendly line output.
-- [ ] One check per line.
-- [ ] Clear success/failure symbols or words.
-- [ ] No secret data.
-- [ ] Non-zero exit code on required failure.
+- [x] Screen-reader-friendly line output.
+- [x] One check per line.
+- [x] Clear success/failure symbols or words.
+- [x] No secret data.
+- [x] Non-zero exit code on required failure.
 
 ### Exit criteria
 
-- [ ] `doctor` provides enough information to diagnose setup without starting MCP.
+- [x] `doctor` provides enough information to diagnose setup without starting MCP.
 
 ---
 
@@ -1006,20 +1078,20 @@ Depends on Phase 10.
 
 ### 17.1 Command
 
-- [ ] Add `agenai-appletv serve`.
-- [ ] Start stdio MCP server.
-- [ ] No normal stdout output.
-- [ ] Support debug logging flag if useful.
+- [x] Add `appletv-mcp serve`.
+- [x] Start stdio MCP server.
+- [x] No normal stdout output.
+- [x] Support debug logging flag if useful.
 
 ### 17.2 Packaging entrypoint
 
-- [ ] Add console-script entry point.
-- [ ] Verify `uv run agenai-appletv serve`.
-- [ ] Verify installed command execution.
+- [x] Add console-script entry point.
+- [x] Verify `uv run appletv-mcp serve`.
+- [x] Verify installed command execution.
 
 ### Exit criteria
 
-- [ ] MCP hosts can launch the server through one stable CLI command.
+- [x] MCP hosts can launch the server through one stable CLI command.
 
 ---
 
@@ -1032,32 +1104,38 @@ Depends on Phases 14 and 17.
 Document command form:
 
 ```text
-uv --directory /absolute/path/to/agenai-appletv-mcp run agenai-appletv serve
+uv --directory /absolute/path/to/appletv-mcp run appletv-mcp serve
 ```
 
 or installed executable path.
 
 ### 18.2 Test with MCP Inspector
 
-- [ ] Tool list appears.
-- [ ] Schemas render.
-- [ ] Read-only tools work.
-- [ ] Expected errors render as tool errors.
-- [ ] No protocol corruption from stdout.
+Not run as the Inspector GUI in this environment. Equivalent stdio coverage is in
+`tests/contract/mcp/test_stdio_transport.py` (real subprocess) and
+`tests/contract/mcp/test_tool_contract.py` (in-memory MCP client).
+
+- [ ] Tool list appears in MCP Inspector GUI.
+- [x] Tool list appears via stdio/`tools/list`.
+- [x] Schemas are present on listed tools.
+- [x] Read-only tools work against a mocked controller.
+- [x] Expected errors render as tool errors (`is_error=True`).
+- [x] No protocol corruption from stdout.
 
 ### 18.3 Test with target agent host(s)
 
-For each intended host:
+Cursor / Claude Desktop / Codex were not launched against a live Apple TV here.
+The stdio subprocess test is the transport stand-in.
 
-- [ ] Server starts.
-- [ ] Tools discover.
-- [ ] Tool arguments serialize correctly.
-- [ ] Structured results are preserved.
-- [ ] Host does not incorrectly require HTTP/OAuth.
+- [ ] Server starts in a production MCP host UI.
+- [x] Tools discover over stdio.
+- [x] Tool arguments serialize correctly (contract tests).
+- [x] Structured results are preserved (contract tests).
+- [x] Host does not incorrectly require HTTP/OAuth (stdio-only v0.1).
 
 ### Exit criteria
 
-- [ ] At least one real agent host can control a mocked controller through the actual stdio process.
+- [x] At least one real agent host can control a mocked controller through the actual stdio process.
 
 ---
 
@@ -1070,8 +1148,8 @@ This phase validates pinned `pyatv` assumptions against the real device.
 ### 19.1 Pairing/setup
 
 - [ ] Run `atvremote wizard` if credentials do not already exist.
-- [ ] Run `agenai-appletv configure`.
-- [ ] Run `agenai-appletv doctor`.
+- [ ] Run `appletv-mcp configure`.
+- [ ] Run `appletv-mcp doctor`.
 
 ### 19.2 Read-only validation
 
@@ -1138,41 +1216,41 @@ Depends on stable behavior from Phases 15–19.
 
 Document:
 
-- [ ] Purpose.
-- [ ] Requirements.
-- [ ] Install.
-- [ ] Pairing.
-- [ ] Configure.
-- [ ] Doctor.
-- [ ] Serve.
-- [ ] MCP host configuration.
-- [ ] Tool summary.
-- [ ] Perception limitations.
-- [ ] Troubleshooting.
+- [x] Purpose.
+- [x] Requirements.
+- [x] Install.
+- [x] Pairing.
+- [x] Configure.
+- [x] Doctor.
+- [x] Serve.
+- [x] MCP host configuration.
+- [x] Tool summary.
+- [x] Perception limitations.
+- [x] Troubleshooting.
 
 ### 20.2 Security/privacy notes
 
 Document:
 
-- [ ] Pairing credentials remain local.
-- [ ] Credentials are not exposed through MCP.
-- [ ] Text-entry contents are not logged.
-- [ ] v0.1 is local stdio only.
+- [x] Pairing credentials remain local.
+- [x] Credentials are not exposed through MCP.
+- [x] Text-entry contents are not logged.
+- [x] v0.1 is local stdio only.
 
 ### 20.3 Developer docs
 
 Document:
 
-- [ ] Architecture layers.
-- [ ] Connection retry rules.
-- [ ] Idempotency rules.
-- [ ] Feature mapping.
-- [ ] Testing.
-- [ ] How to update pinned upstream versions.
+- [x] Architecture layers.
+- [x] Connection retry rules.
+- [x] Idempotency rules.
+- [x] Feature mapping.
+- [x] Testing.
+- [x] How to update pinned upstream versions.
 
 ### Exit criteria
 
-- [ ] A new developer can set up the project without reading implementation source.
+- [x] A new developer can set up the project without reading implementation source.
 
 ---
 
@@ -1180,31 +1258,31 @@ Document:
 
 ### 21.1 Automated gates
 
-- [ ] `uv sync --locked`.
-- [ ] `uv run ruff check .`.
-- [ ] `uv run ruff format --check .`.
-- [ ] `uv run pyright`.
-- [ ] `uv run pytest`.
+- [x] `uv sync --locked`.
+- [x] `uv run ruff check .`.
+- [x] `uv run ruff format --check .`.
+- [x] `uv run pyright`.
+- [x] `uv run pytest`.
 
 ### 21.2 Contract gate
 
-- [ ] Exact v0.1 tool inventory.
-- [ ] No accidental raw-`pyatv` tools.
-- [ ] No pairing MCP tool.
-- [ ] No device selector argument.
-- [ ] No HTTP/OAuth code in v0.1.
-- [ ] No foreground-app claims.
-- [ ] No visual-screen claims.
+- [x] Exact v0.1 tool inventory.
+- [x] No accidental raw-`pyatv` tools.
+- [x] No pairing MCP tool.
+- [x] No device selector argument.
+- [x] No HTTP/OAuth code in v0.1.
+- [x] No foreground-app claims.
+- [x] No visual-screen claims.
 
 ### 21.3 Security gate
 
 Search repository for:
 
-- [ ] Hardcoded credentials.
-- [ ] Raw storage dumps.
-- [ ] Accidental keyboard text logging.
-- [ ] `print(` in MCP serving paths.
-- [ ] Secret-looking fixture data.
+- [x] Hardcoded credentials.
+- [x] Raw storage dumps.
+- [x] Accidental keyboard text logging.
+- [x] `print(` in MCP serving paths.
+- [x] Secret-looking fixture data.
 
 ### 21.4 Live gate
 
@@ -1218,9 +1296,9 @@ Search repository for:
 
 ### 21.5 Release
 
-- [ ] Set version `0.1.0`.
+- [x] Set version `0.1.0`.
 - [ ] Tag release.
-- [ ] Preserve pinned references used for implementation.
+- [x] Preserve pinned references used for implementation.
 - [ ] Record any upstream quirks discovered during live validation.
 
 ---
@@ -1306,58 +1384,58 @@ If one agent is implementing the project end-to-end, give it these batches in or
 
 ### Batch A — Foundation
 
-- [ ] Phase 0.
-- [ ] Phase 1.
-- [ ] Phase 2.
-- [ ] Phase 3.
+- [x] Phase 0.
+- [x] Phase 1.
+- [x] Phase 2.
+- [x] Phase 3.
 
 Stop and run all tests.
 
 ### Batch B — Device Infrastructure
 
-- [ ] Phase 4.
-- [ ] Phase 5.
+- [x] Phase 4.
+- [x] Phase 5.
 
 Stop and run all tests.
 
 ### Batch C — Controller
 
-- [ ] Phase 6.
-- [ ] Phase 7.
-- [ ] Phase 8.
-- [ ] Phase 9.
+- [x] Phase 6.
+- [x] Phase 7.
+- [x] Phase 8.
+- [x] Phase 9.
 
 Stop and run all tests.
 
 ### Batch D — MCP
 
-- [ ] Phase 10.
-- [ ] Phase 11.
-- [ ] Phase 12.
-- [ ] Phase 13.
-- [ ] Phase 14.
+- [x] Phase 10.
+- [x] Phase 11.
+- [x] Phase 12.
+- [x] Phase 13.
+- [x] Phase 14.
 
-Stop and run all tests plus MCP Inspector.
+Stop and run all tests. Stdio MCP transport is covered by contract tests; MCP Inspector GUI was not available.
 
 ### Batch E — Local UX
 
-- [ ] Phase 15.
-- [ ] Phase 16.
-- [ ] Phase 17.
+- [x] Phase 15.
+- [x] Phase 16.
+- [x] Phase 17.
 
 Stop and validate local CLI behavior.
 
 ### Batch F — Integration
 
-- [ ] Phase 18.
+- [x] Phase 18 (stdio transport; Inspector GUI not run).
 - [ ] Phase 19.
 
 Do not change public tool semantics casually in this phase. If real-device behavior requires a contract change, update `SPEC.md` deliberately.
 
 ### Batch G — Ship
 
-- [ ] Phase 20.
-- [ ] Phase 21.
+- [x] Phase 20.
+- [x] Phase 21.
 
 ---
 

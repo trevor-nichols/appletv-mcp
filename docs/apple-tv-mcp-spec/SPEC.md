@@ -1,7 +1,7 @@
-# AgenAI Apple TV MCP
+# Apple TV MCP
 
 **Status:** Approved v0.1 Specification  
-**Project:** `agenai-appletv-mcp`  
+**Project:** `appletv-mcp`  
 **Primary purpose:** Expose reliable, semantic Apple TV control to AI agents through a local MCP server backed by `pyatv`.
 
 ---
@@ -45,7 +45,7 @@ Recommended direct dependencies:
 
 ```toml
 [project]
-name = "agenai-appletv-mcp"
+name = "appletv-mcp"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 
@@ -55,6 +55,9 @@ dependencies = [
     "pydantic>=2.12,<3",
     "platformdirs",
 ]
+
+[project.scripts]
+appletv-mcp = "appletv_mcp.interfaces.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -251,7 +254,7 @@ Remote navigation is blind and non-idempotent.
 ## 5. Repository Structure
 
 ```text
-agenai-appletv-mcp/
+appletv-mcp/
 ├── pyproject.toml
 ├── uv.lock
 ├── .python-version
@@ -263,7 +266,7 @@ agenai-appletv-mcp/
 │   └── ...
 │
 ├── src/
-│   └── agenai_appletv_mcp/
+│   └── appletv_mcp/
 │       ├── __init__.py
 │       ├── server.py
 │       ├── lifespan.py
@@ -301,7 +304,9 @@ Example:
 }
 ```
 
-Use `platformdirs` to determine the application configuration directory.
+Use `platformdirs` with application name `appletv-mcp` to determine the application configuration directory.
+
+The configuration directory may be overridden with `APPLETV_MCP_CONFIG_DIR` for tests and unusual installs.
 
 Configuration semantics:
 
@@ -339,21 +344,23 @@ atvremote wizard
 Then:
 
 ```bash
-agenai-appletv configure
+appletv-mcp configure
 ```
 
 `configure` must:
 
 1. Load `pyatv` persistent storage.
 2. Scan Apple TVs.
-3. Show discovered devices that can be used with stored credentials.
-4. Allow the user to select the target Apple TV.
-5. Save its stable identifier.
-6. Save its display name for diagnostics.
-7. Save its current host as `preferred_host`.
-8. Connect once to verify the stored credentials.
-9. Display a concise capability summary.
-10. Close the connection cleanly.
+3. Ignore known non-TV `pyatv` models (HomePod, AirPort Express, Music/iTunes).
+   Devices with `DeviceModel.Unknown` may be selected, with an explicit warning.
+4. Show discovered devices that can be used with stored credentials.
+5. Allow the user to select the target Apple TV.
+6. Save its stable identifier.
+7. Save its display name for diagnostics.
+8. Save its current host as `preferred_host`.
+9. Connect once to verify the stored credentials.
+10. Display a concise capability summary.
+11. Close the connection cleanly.
 
 A later version may replace the `atvremote wizard` step with a custom pairing flow.
 
@@ -423,6 +430,7 @@ Public interface:
 class ConnectionManager:
     async def get(self) -> AppleTV: ...
     async def reconnect(self) -> AppleTV: ...
+    async def disconnect(self) -> None: ...
     async def close(self) -> None: ...
     def invalidate(self) -> None: ...
 ```
@@ -443,6 +451,9 @@ get()
  │
  ├── healthy cached connection?
  │      └── return
+ │
+ ├── stale cached connection?
+ │      └── close the retained pyatv object
  │
  ├── preferred_host available?
  │      ├── unicast scan
@@ -487,6 +498,11 @@ A connection must be invalidated when:
 
 Invalidation must not delete persistent pairing credentials.
 
+`invalidate()` marks the cached session unusable but retains ownership of the
+`pyatv` object. `reconnect()`, `disconnect()`, a subsequent `get()`, and `close()`
+are responsible for calling `atv.close()`. Dropping the cached handle before
+close orphans a live protocol session.
+
 ---
 
 ## 10. Reconnection and Retry Policy
@@ -497,7 +513,19 @@ Read operations may:
 2. Reconnect.
 3. Retry once.
 
+Transport, timeout, authentication, and connection errors during a status read
+must propagate as connection failures. Only genuine “this optional field is
+unavailable” exceptions (`NotSupportedError`, `InvalidStateError`) may be
+treated as absent metadata.
+
 Do not automatically replay a non-idempotent operation after an uncertain transport failure.
+
+Capability checks, status/app reads, and other preflight observations are not
+command delivery. A connection failure during those reads must not be reported
+as `UncertainExecutionError` even when the outer operation is non-idempotent.
+`may_have_been_delivered` is set only for the actual mutating pyatv call.
+`BlockedStateError` is a local rejection of a closed session and never counts
+as delivery.
 
 Example:
 
@@ -519,7 +547,7 @@ Safe for one automatic retry after reconnect:
 - App listing.
 - Explicit absolute volume set.
 - Explicit absolute seek.
-- Power request when state can be verified.
+- Power-on after reconnect (reconnect/wake moves toward on).
 
 Do not replay automatically:
 
@@ -530,8 +558,14 @@ Do not replay automatically:
 - Previous/next.
 - Play/pause toggle.
 - Relative skips when execution is uncertain.
+- URL / deep-link launches.
+- Power-off after uncertain dispatch (unicast rediscovery knocks ports and can wake the TV).
 
-When a non-idempotent command fails after dispatch uncertainty, return a `ToolError` explaining that execution state is uncertain.
+When a replay-unsafe command fails after dispatch uncertainty, return a `ToolError` explaining that execution state is uncertain.
+
+The same check applies to the retry attempt. A first failure that was safe to retry may reconnect once; if the second dispatch then fails after possible delivery, raise `UncertainExecutionError` rather than a raw connection error.
+
+Companion `ProtocolError` is cause-aware: a timeout or connection failure in `__cause__`/`__context__`, or a stale connection listener, is a connection/timeout error that participates in retry/uncertainty. A protocol/application rejection while the session is still healthy is `CommandFailedError`.
 
 ---
 
@@ -585,7 +619,7 @@ Create an explicitly named and versioned server:
 
 ```python
 mcp = MCPServer(
-    "agenai-appletv",
+    "appletv-mcp",
     version="0.1.0",
     instructions=SERVER_INSTRUCTIONS,
     lifespan=app_lifespan,
@@ -772,7 +806,15 @@ on  → atv.power.turn_on(...)
 off → atv.power.turn_off(...)
 ```
 
-Prefer waiting for an observed state transition when supported, bounded by the command timeout.
+Prefer waiting for an observed state transition when the active power protocol
+supports `await_new_state`. pyatv 0.18.0 Companion (the facade's preferred power
+implementation) advertises `TurnOn`/`TurnOff` as available but raises
+`NotImplementedError` when `await_new_state=True`. Power commands therefore
+dispatch with `await_new_state=False` and treat `power_state` on the same
+connection as a best-effort observation. If the resulting state cannot be
+verified, `PowerResult.power_state` is `unknown` rather than failing a command
+that already executed. Do not reconnect after power-off solely to verify state;
+a reconnect/wake can undo shutdown.
 
 Output:
 
@@ -787,9 +829,15 @@ Tool annotations:
 ```text
 read_only_hint = false
 destructive_hint = false
-idempotent_hint = true
+idempotent_hint = false
 open_world_hint = false
 ```
+
+Annotations are static and cannot say “on is retry-safe but off is not.”
+The whole tool is therefore conservative: MCP clients must not treat
+`apple_tv_power` as automatically retry-safe. Server-side, power-on remains
+an idempotent write; power-off is `REPLAY_UNSAFE` because reconnect/unicast
+discovery can wake the device before Sleep is sent again.
 
 ---
 
@@ -850,12 +898,26 @@ Do not claim that arbitrary applications support arbitrary deep links.
 
 A successful result means the launch request was accepted. It does not prove that a specific item is visible on screen.
 
+Deep links are not safely idempotent. Custom schemes can start playback or other
+side effects, so `apple_tv_open_url` must not be retried after uncertain delivery.
+Launching by resolved bundle ID via `apple_tv_open_app` remains an absolute
+application-state request and may stay idempotent.
+
 Output:
 
 ```python
 class OpenUrlResult(BaseModel):
     url: str
     accepted: bool
+```
+
+Tool annotations:
+
+```text
+read_only_hint = false
+destructive_hint = false
+idempotent_hint = false
+open_world_hint = false
 ```
 
 ---
@@ -1211,11 +1273,11 @@ Never use `print()` while serving MCP over stdio.
 Recommended defaults:
 
 ```text
-agenai_appletv_mcp    INFO
+appletv_mcp           INFO
 pyatv                 WARNING
 ```
 
-Debug mode may enable additional `pyatv` diagnostics.
+`--debug` raises `appletv_mcp` to DEBUG and leaves `pyatv` at WARNING. Companion DEBUG logs include full OPACK frames (keyboard text, credentials).
 
 Normal logs must never contain:
 
@@ -1237,12 +1299,14 @@ not the text itself.
 
 ## 19. CLI
 
+The console executable is `appletv-mcp`.
+
 Initial commands:
 
 ```text
-agenai-appletv configure
-agenai-appletv doctor
-agenai-appletv serve
+appletv-mcp configure
+appletv-mcp doctor
+appletv-mcp serve
 ```
 
 ### 19.1 `configure`
@@ -1251,6 +1315,7 @@ Responsibilities:
 
 - Load `pyatv` storage.
 - Discover devices.
+- Reject known non-TV models (HomePod, AirPort Express, Music); warn on unknown.
 - Select the target.
 - Save stable identity.
 - Save preferred host.
@@ -1470,7 +1535,7 @@ unless observable `pyatv` state actually supports the claim.
 Add optional localhost Streamable HTTP:
 
 ```text
-agenai-appletv serve --transport http
+appletv-mcp serve --transport http
 ```
 
 Purpose:

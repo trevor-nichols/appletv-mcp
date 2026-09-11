@@ -1,0 +1,162 @@
+"""Map pyatv exceptions to domain errors without leaking credentials."""
+
+from collections.abc import Iterator
+
+from pyatv import exceptions as pyatv_exceptions
+
+from appletv_mcp.domain.errors import (
+    CommandFailedError,
+    CommandTimeoutError,
+    ConfigurationError,
+    DeviceConnectionError,
+    DeviceUnreachableError,
+    FeatureUnavailableError,
+    FeatureUnsupportedError,
+    PairingRequiredError,
+    StorageError,
+)
+
+_PAIRING = (
+    pyatv_exceptions.NoCredentialsError,
+    pyatv_exceptions.InvalidCredentialsError,
+    pyatv_exceptions.AuthenticationError,
+    pyatv_exceptions.PairingError,
+)
+
+_UNSUPPORTED = (pyatv_exceptions.NotSupportedError,)
+_UNAVAILABLE = (pyatv_exceptions.InvalidStateError,)
+_UNREACHABLE = (
+    pyatv_exceptions.ConnectionFailedError,
+    pyatv_exceptions.NoServiceError,
+    pyatv_exceptions.DeviceIdMissingError,
+)
+_DISCONNECTED = (pyatv_exceptions.ConnectionLostError,)
+_TIMEOUT = (pyatv_exceptions.OperationTimeoutError,)
+
+# Property/call failures that mean "this optional field is not available"
+# rather than "the connection or command transport failed".
+_OPTIONAL_ABSENCE = (
+    pyatv_exceptions.NotSupportedError,
+    pyatv_exceptions.InvalidStateError,
+)
+
+
+def is_optional_absence(exc: BaseException) -> bool:
+    """Return True when `exc` means an optional device field is unavailable."""
+
+    return isinstance(exc, _OPTIONAL_ABSENCE)
+
+
+def translate_exception(
+    exc: Exception,
+    *,
+    operation: str,
+    may_have_been_delivered: bool,
+    connection_stale: bool = False,
+) -> Exception:
+    """Return a domain error equivalent to `exc`, or `exc` if unexpected."""
+
+    if isinstance(exc, TimeoutError):
+        return CommandTimeoutError(
+            f"The {operation} command timed out.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    if isinstance(exc, _TIMEOUT):
+        return CommandTimeoutError(
+            f"The {operation} command timed out.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    if isinstance(exc, _PAIRING):
+        return PairingRequiredError(
+            "Apple TV pairing credentials are missing or invalid. "
+            "Run `atvremote wizard`, then `appletv-mcp configure`."
+        )
+    if isinstance(exc, _UNSUPPORTED):
+        return FeatureUnsupportedError(f"{operation} is not supported by this device.")
+    if isinstance(exc, _UNAVAILABLE):
+        return FeatureUnavailableError(f"{operation} is unavailable in the current device state.")
+    if isinstance(exc, _UNREACHABLE):
+        return DeviceUnreachableError(
+            f"Apple TV could not be reached while performing {operation}.",
+            may_have_been_delivered=False,
+        )
+    if isinstance(exc, pyatv_exceptions.BlockedStateError):
+        return DeviceConnectionError(
+            f"The Apple TV connection is closed and cannot perform {operation}.",
+            may_have_been_delivered=False,
+        )
+    if isinstance(exc, _DISCONNECTED):
+        return DeviceConnectionError(
+            f"The Apple TV connection failed while performing {operation}.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    if isinstance(exc, pyatv_exceptions.BackOffError):
+        return CommandFailedError("Apple TV requested a backoff period; retry later.")
+    if isinstance(exc, pyatv_exceptions.InvalidResponseError):
+        return CommandFailedError(f"The Apple TV returned an invalid response during {operation}.")
+    if isinstance(exc, pyatv_exceptions.InvalidConfigError):
+        return ConfigurationError(
+            f"Apple TV protocol configuration is invalid while performing {operation}."
+        )
+    if isinstance(exc, pyatv_exceptions.SettingsError):
+        return StorageError("pyatv storage or settings could not be used.")
+    if isinstance(exc, pyatv_exceptions.CommandError):
+        return CommandFailedError(f"The Apple TV rejected the {operation} command.")
+    if isinstance(exc, pyatv_exceptions.ProtocolError):
+        return _translate_protocol_error(
+            exc,
+            operation=operation,
+            may_have_been_delivered=may_have_been_delivered,
+            connection_stale=connection_stale,
+        )
+    return exc
+
+
+_TIMEOUT_CAUSES = (TimeoutError, pyatv_exceptions.OperationTimeoutError)
+_CONNECTION_CAUSES = (
+    pyatv_exceptions.ConnectionLostError,
+    pyatv_exceptions.ConnectionFailedError,
+    ConnectionError,
+)
+
+
+def _translate_protocol_error(
+    exc: pyatv_exceptions.ProtocolError,
+    *,
+    operation: str,
+    may_have_been_delivered: bool,
+    connection_stale: bool,
+) -> Exception:
+    """Map Companion-wrapped transport failures back to connection/timeout errors.
+
+    CompanionAPI._send_command catches almost any exchange failure and re-raises
+    ProtocolError. exchange_opack waits for a response with a timeout, so a dropped
+    link after dispatch commonly surfaces as ProtocolError caused by TimeoutError.
+    Genuine protocol/application rejections while the session is still healthy stay
+    CommandFailedError.
+    """
+
+    if _chain_matches(exc, _TIMEOUT_CAUSES):
+        return CommandTimeoutError(
+            f"The {operation} command timed out.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    if connection_stale or _chain_matches(exc, _CONNECTION_CAUSES):
+        return DeviceConnectionError(
+            f"The Apple TV connection failed while performing {operation}.",
+            may_have_been_delivered=may_have_been_delivered,
+        )
+    return CommandFailedError(f"A protocol error occurred during {operation}.")
+
+
+def _chain_matches(exc: BaseException, types: tuple[type[BaseException], ...]) -> bool:
+    return any(isinstance(item, types) for item in _exception_chain(exc))
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        yield current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
