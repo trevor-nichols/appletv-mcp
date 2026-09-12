@@ -1,0 +1,120 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "appletv-screenshot"
+version = "0.2.0"
+description = "Screen-capture helper for Apple TV MCP: one PNG per run over RemoteXPC via pymobiledevice3."
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+authors = [{ name = "Trevor Nichols" }]
+keywords = ["apple-tv", "screenshot", "pymobiledevice3", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Home Automation",
+]
+dependencies = [
+    "pymobiledevice3==11.12.4",
+    "pydantic>=2.12,<3",
+    "platformdirs>=4.3,<5",
+]
+
+[project.scripts]
+appletv-screenshot = "appletv_screenshot.cli:main"
+
+[project.urls]
+Documentation = "https://github.com/trevor-nichols/appletv-mcp"
+Issues = "https://github.com/trevor-nichols/appletv-mcp/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "ruff>=0.12",
+    "pyright>=1.1.406",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",
+    "ASYNC",
+    "B",
+    "C4",
+    "E",
+    "F",
+    "I",
+    "ICN",
+    "N",
+    "PERF",
+    "PIE",
+    "PL",
+    "PTH",
+    "RUF",
+    "SIM",
+    "SLOT",
+    "T20",
+    "TC",
+    "UP",
+    "W",
+]
+ignore = [
+    "PLR2004",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLC0415",
+    # Pydantic models and Protocol signatures need these types at runtime.
+    "TC001",
+    "TC002",
+    "TC003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ASYNC109: fakes mirror pymobiledevice3 signatures that take a `timeout` argument.
+"tests/**" = ["T20", "PLC0415", "SLF001", "ARG001", "ASYNC109"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pyright]
+pythonVersion = "3.14"
+pythonPlatform = "All"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+include = ["src", "tests"]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+]
+reportDeprecated = false
+reportMissingTypeStubs = false
+reportUnknownMemberType = "warning"
+reportUnknownArgumentType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownLambdaType = "warning"
+reportPrivateUsage = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/appletv_screenshot"]
