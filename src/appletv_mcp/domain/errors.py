@@ -91,3 +91,27 @@ class ConfigurationError(AppleTVError):
 
 class StorageError(AppleTVError):
     """pyatv persistent storage could not be loaded."""
+
+
+class ScreenCaptureError(AppleTVError):
+    """Base class for screen-capture failures raised by the observation path."""
+
+
+class ScreenCaptureUnavailableError(ScreenCaptureError):
+    """The external screen-capture helper is not installed or not resolvable."""
+
+
+class ScreenCapturePairingRequiredError(ScreenCaptureError):
+    """The Apple TV is not paired for developer/RemoteXPC screen capture."""
+
+
+class ScreenCaptureTimeoutError(ScreenCaptureError):
+    """The helper did not return a screenshot within the configured timeout."""
+
+
+class ScreenCaptureFailedError(ScreenCaptureError):
+    """The helper ran but could not capture the screen."""
+
+
+class ScreenCaptureInvalidImageError(ScreenCaptureError):
+    """The helper completed but its output is not a usable PNG image."""
