@@ -1,18 +1,32 @@
 """Screen-reader friendly diagnostic rendering."""
 
 from dataclasses import dataclass
+from enum import StrEnum
+
+
+class CheckStatus(StrEnum):
+    OK = "OK"
+    FAIL = "FAIL"
+    SKIP = "SKIP"
 
 
 @dataclass(frozen=True, slots=True)
 class CheckResult:
     name: str
-    ok: bool
+    status: CheckStatus
     detail: str
     required: bool = True
 
+    @property
+    def failed(self) -> bool:
+        return self.status is CheckStatus.FAIL
+
     def line(self) -> str:
-        status = "OK" if self.ok else "FAIL"
-        return f"{status} {self.name}: {self.detail}"
+        return f"{self.status.value} {self.name}: {self.detail}"
+
+
+def exit_code_for(checks: list[CheckResult]) -> int:
+    return 1 if any(check.failed and check.required for check in checks) else 0
 
 
 def render_device_row(index: int, name: str, identifier: str, address: str) -> str:
