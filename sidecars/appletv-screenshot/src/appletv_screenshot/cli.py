@@ -131,8 +131,8 @@ def configure_logging(*, verbose: bool) -> None:
     logging.basicConfig(
         level=level, stream=sys.stderr, format="%(levelname)s %(name)s: %(message)s"
     )
-    # pymobiledevice3 logs tunnel and pairing details at DEBUG; never go below INFO for it.
-    logging.getLogger("pymobiledevice3").setLevel(level)
+    # Pair records and tunnel frames show up in pymobiledevice3 below WARNING.
+    logging.getLogger("pymobiledevice3").setLevel(logging.WARNING)
 
 
 def _emit(stream: TextIO, line: str) -> None:

@@ -32,6 +32,8 @@ async def test_live_screenshot_is_a_png_with_dimensions(runtime: Runtime) -> Non
     screen = await runtime.screen_capture.capture()
 
     assert screen.mime_type == "image/png"
+    assert len(screen.data) > 0
+    assert screen.data.startswith(b"\x89PNG\r\n\x1a\n")
     info = inspect_png(screen.data)
     assert info is not None
     assert info.width > 0

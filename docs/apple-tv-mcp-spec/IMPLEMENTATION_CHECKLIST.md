@@ -46,7 +46,7 @@ Completed in software (mocked / no hardware):
 - Lazy connection manager, identifier-first discovery, preferred-host IPv4 unicast hint
 - Capability map verified against pyatv 0.18.0 `FeatureName`
 - `AppleTVController` with deterministic app resolution and retry/idempotency policy
-- 13 MCP v2 tools with typed inputs/outputs and `ToolAnnotations`
+- 14 MCP v2 tools with typed inputs/outputs and `ToolAnnotations` (v0.2 adds `apple_tv_screenshot`)
 - CLI: `configure`, `doctor`, `serve`
 - Quality gates: ruff, ruff format, pyright (0 errors), pytest
 

@@ -259,6 +259,7 @@ async def test_structured_status_and_capabilities() -> None:
     assert "active_app" not in status.structured_content
     assert caps.structured_content is not None
     assert caps.structured_content["play"] == "available"
+    assert "screenshot" not in caps.structured_content
 
 
 async def test_tool_error_sets_is_error() -> None:

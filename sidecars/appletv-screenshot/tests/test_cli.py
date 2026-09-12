@@ -179,8 +179,8 @@ def test_udid_and_clear_udid_are_mutually_exclusive(capsys: pytest.CaptureFixtur
     assert excinfo.value.code == ExitCode.USAGE
 
 
-def test_logging_never_goes_below_info_for_pymobiledevice3() -> None:
+def test_pymobiledevice3_stays_at_warning_even_when_verbose() -> None:
     configure_logging(verbose=False)
     assert logging.getLogger("pymobiledevice3").level == logging.WARNING
     configure_logging(verbose=True)
-    assert logging.getLogger("pymobiledevice3").level == logging.INFO
+    assert logging.getLogger("pymobiledevice3").level == logging.WARNING
