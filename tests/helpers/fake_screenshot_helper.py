@@ -37,6 +37,12 @@ def main() -> int:
     (state / "cwd").write_text(str(Path.cwd()), encoding="utf-8")
     (state / "pid").write_text(str(os.getpid()), encoding="utf-8")
 
+    if mode == "hang":
+        _hang_forever()
+    if mode == "hang-ignore-term":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        _hang_forever()
+
     if args == ["--version"]:
         contract = "2" if mode == "contract-mismatch" else "1"
         print(
@@ -67,11 +73,6 @@ def main() -> int:
     if mode.startswith("write-then-exit:"):
         output.write_bytes(image)
         return int(mode.removeprefix("write-then-exit:"))
-    if mode == "hang":
-        _hang_forever()
-    if mode == "hang-ignore-term":
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        _hang_forever()
     if mode == "no-output":
         return 0
     if mode == "empty":

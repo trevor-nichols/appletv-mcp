@@ -76,11 +76,19 @@ def transport_order(preference: Transport, system: str | None = None) -> list[Tr
     return [preference]
 
 
-def most_specific(failures: list[SidecarError]) -> SidecarError:
-    """Pick the failure to report when every transport failed.
+@dataclass(frozen=True, slots=True)
+class TransportFailure:
+    transport: Transport
+    error: SidecarError
 
-    Pairing and identity problems name what the operator must fix; a missing
-    tunnel daemon is the least informative and loses ties to anything else.
+
+def most_specific(failures: list[SidecarError]) -> SidecarError:
+    """Rank failures inside one credential domain.
+
+    Pairing and identity name what the operator must fix in that domain. A missing
+    tunnel daemon is the least informative and loses ties to anything else. AUTO
+    does not use this ranking when userspace already ran. See
+    `reported_capture_failure`.
     """
 
     if not failures:
@@ -95,6 +103,33 @@ def most_specific(failures: list[SidecarError]) -> SidecarError:
     return SidecarError(chosen.exit_code, detail)
 
 
+def reported_capture_failure(
+    preference: Transport, failures: list[TransportFailure]
+) -> SidecarError:
+    """Choose the failure AUTO or a pinned transport reports after every attempt failed.
+
+    AUTO still tries native, then userspace, then tunneld. Diagnosis is separate.
+    Pairing is per credential domain. Once userspace ran, that outcome is the
+    report. Native pairing does not outrank a later userspace device or tunnel
+    failure. If userspace never ran, ranking among the attempts that did can
+    still prefer pairing.
+    """
+
+    if not failures:
+        raise ValueError("no failures to choose from")
+    chosen = _diagnostic_error(preference, failures)
+    detail = "; ".join(f"{item.transport.value}: {item.error.detail}" for item in failures)
+    return SidecarError(chosen.exit_code, detail)
+
+
+def _diagnostic_error(preference: Transport, failures: list[TransportFailure]) -> SidecarError:
+    if preference is Transport.AUTO:
+        for item in failures:
+            if item.transport is Transport.USERSPACE:
+                return item.error
+    return most_specific([item.error for item in failures])
+
+
 async def open_device(
     config: SidecarConfig, openers: dict[Transport, Opener] | None = None
 ) -> DeviceSession:
@@ -102,12 +137,12 @@ async def open_device(
 
     require_configured_udid(config.udid)
     table = openers or _default_openers()
-    failures: list[SidecarError] = []
+    failures: list[TransportFailure] = []
     for transport in transport_order(config.transport):
         try:
             session = await table[transport](config)
         except SidecarError as exc:
-            failures.append(SidecarError(exc.exit_code, f"{transport.value}: {exc.detail}"))
+            failures.append(TransportFailure(transport, exc))
             continue
         try:
             require_apple_tv_product(
@@ -117,7 +152,7 @@ async def open_device(
             await session.aclose()
             raise
         return session
-    raise most_specific(failures)
+    raise reported_capture_failure(config.transport, failures)
 
 
 def _default_openers() -> dict[Transport, Opener]:

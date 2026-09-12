@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import time
 from asyncio.subprocess import DEVNULL, PIPE, Process
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from pathlib import Path
 
 from appletv_mcp.domain.errors import (
@@ -62,15 +62,29 @@ async def run_helper_command(
         stdout=PIPE,
         stderr=DEVNULL,
     )
-    try:
-        async with asyncio.timeout(timeout_seconds):
-            stdout, _stderr = await process.communicate()
-    except TimeoutError:
-        await _stop_process(process, terminate_grace_seconds)
-        raise
+    stdout, _stderr = await _await_helper(
+        process, process.communicate(), timeout_seconds, terminate_grace_seconds
+    )
     text = stdout.decode("utf-8", errors="replace").strip()
     returncode = process.returncode
     return (returncode if returncode is not None else 1), text
+
+
+async def _await_helper[T](
+    process: Process,
+    operation: Awaitable[T],
+    timeout_seconds: float,
+    terminate_grace_seconds: float,
+) -> T:
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            return await operation
+    except TimeoutError:
+        await _stop_process(process, terminate_grace_seconds)
+        raise
+    except asyncio.CancelledError:
+        await _stop_process(process, terminate_grace_seconds)
+        raise
 
 
 async def _stop_process(process: Process, terminate_grace_seconds: float) -> None:
@@ -136,18 +150,18 @@ class ExternalScreenCaptureBackend:
                 f"not be started ({exc.strerror or 'unknown error'}). Run `appletv-mcp doctor`."
             ) from exc
         try:
-            async with asyncio.timeout(self._settings.timeout_seconds):
-                returncode = await process.wait()
+            returncode = await _await_helper(
+                process,
+                process.wait(),
+                self._settings.timeout_seconds,
+                self._terminate_grace_seconds,
+            )
         except TimeoutError:
-            await self._stop(process)
             logger.warning(
                 "Screen-capture helper exceeded %.1fs and was stopped",
                 self._settings.timeout_seconds,
             )
             raise ScreenCaptureTimeoutError(TIMEOUT_MESSAGE) from None
-        except asyncio.CancelledError:
-            await self._stop(process)
-            raise
         elapsed = time.monotonic() - started
         if returncode != HelperExitCode.SUCCESS:
             error = error_for_exit_status(returncode)
@@ -159,9 +173,6 @@ class ExternalScreenCaptureBackend:
             )
             raise error
         logger.debug("Screen-capture helper exited successfully after %.2fs", elapsed)
-
-    async def _stop(self, process: Process) -> None:
-        await _stop_process(process, self._terminate_grace_seconds)
 
     def _load_output(self, output: Path) -> CapturedScreen:
         try:

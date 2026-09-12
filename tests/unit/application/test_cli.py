@@ -5,8 +5,8 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 from pyatv.interface import Storage
+from pydantic import ValidationError
 
 from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from appletv_mcp.application.services.apple_tv_controller import AppleTVController

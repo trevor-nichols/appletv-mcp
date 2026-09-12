@@ -1,10 +1,13 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
 from pymobiledevice3.exceptions import DeviceNotFoundError
+from pymobiledevice3.remote import tunnel_service
+from pymobiledevice3.remote.common import TunnelProtocol
+from pymobiledevice3.remote.tunnel_service import TunnelResult
 from pymobiledevice3.remote.userspace_tunnel import UserspaceTun
 
 from appletv_screenshot.config import SidecarConfig, Transport
@@ -109,24 +112,37 @@ class _FakeTun(UserspaceTun):
         self.peer = device_addr
 
 
+def _tunnel_result(tun: object) -> TunnelResult:
+    return TunnelResult(
+        interface="utun-userspace",
+        address="fd12:3456::1",
+        port=58783,
+        protocol=TunnelProtocol.TCP,
+        # Test double. session_from_provider only reads client.tun.
+        client=SimpleNamespace(tun=tun),  # type: ignore[arg-type]
+    )
+
+
 @dataclass
 class _RecordingProvider:
     events: list[str]
-    tunnel_result: object | None = None
+    tunnel_result: TunnelResult | None = None
     tunnel_error: BaseException | None = None
     remote_identifier: str = "00008110-AAAA"
     remote_device_model: str = "AppleTV14,1"
 
-    def start_tcp_tunnel(self) -> AbstractAsyncContextManager[object]:
+    def start_tcp_tunnel(self) -> AbstractAsyncContextManager[TunnelResult]:
         events = self.events
         result = self.tunnel_result
         error = self.tunnel_error
 
         @asynccontextmanager
-        async def tunnel() -> AsyncIterator[object]:
+        async def tunnel() -> AsyncIterator[TunnelResult]:
             events.append("tunnel-enter")
             if error is not None:
                 raise error
+            if result is None:
+                raise AssertionError("tunnel_result is required when start_tcp_tunnel succeeds")
             try:
                 yield result
             finally:
@@ -183,15 +199,6 @@ class _FakeSessionRsd:
         self.events.append("rsd-close")
 
 
-def _tunnel_result(tun: object) -> SimpleNamespace:
-    return SimpleNamespace(
-        client=SimpleNamespace(tun=tun),
-        address="fd12:3456::1",
-        port=58783,
-        auxiliary_metadata={"kvs": {}},
-    )
-
-
 def _patch_session_stack(
     monkeypatch: pytest.MonkeyPatch,
     events: list[str],
@@ -220,9 +227,7 @@ def _patch_session_stack(
 
 
 @pytest.fixture
-def reset_userspace_flag() -> None:
-    import pymobiledevice3.remote.tunnel_service as tunnel_service
-
+def reset_userspace_flag() -> Iterator[None]:
     tunnel_service.USE_USERSPACE_TUNNEL = False
     yield
     tunnel_service.USE_USERSPACE_TUNNEL = False
@@ -231,8 +236,6 @@ def reset_userspace_flag() -> None:
 async def test_session_from_provider_success_resets_flag_and_closes_in_stack_order(
     monkeypatch: pytest.MonkeyPatch, reset_userspace_flag: None
 ) -> None:
-    import pymobiledevice3.remote.tunnel_service as tunnel_service
-
     events: list[str] = []
     tun = _FakeTun()
     provider = _RecordingProvider(events, tunnel_result=_tunnel_result(tun))
@@ -260,8 +263,6 @@ async def test_session_from_provider_success_resets_flag_and_closes_in_stack_ord
 async def test_session_from_provider_resets_flag_when_start_tcp_tunnel_fails(
     monkeypatch: pytest.MonkeyPatch, reset_userspace_flag: None
 ) -> None:
-    import pymobiledevice3.remote.tunnel_service as tunnel_service
-
     events: list[str] = []
     provider = _RecordingProvider(events, tunnel_error=OSError("tunnel refused"))
     _patch_session_stack(monkeypatch, events)
@@ -278,8 +279,6 @@ async def test_session_from_provider_resets_flag_when_start_tcp_tunnel_fails(
 async def test_session_from_provider_rejects_a_non_userspace_tun(
     monkeypatch: pytest.MonkeyPatch, reset_userspace_flag: None
 ) -> None:
-    import pymobiledevice3.remote.tunnel_service as tunnel_service
-
     events: list[str] = []
     provider = _RecordingProvider(events, tunnel_result=_tunnel_result(object()))
     _patch_session_stack(monkeypatch, events)
@@ -296,8 +295,6 @@ async def test_session_from_provider_rejects_a_non_userspace_tun(
 async def test_session_from_provider_unwinds_when_rsd_connect_fails(
     monkeypatch: pytest.MonkeyPatch, reset_userspace_flag: None
 ) -> None:
-    import pymobiledevice3.remote.tunnel_service as tunnel_service
-
     events: list[str] = []
     tun = _FakeTun()
     provider = _RecordingProvider(events, tunnel_result=_tunnel_result(tun))

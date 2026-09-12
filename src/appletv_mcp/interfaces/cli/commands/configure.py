@@ -155,4 +155,6 @@ def _settings_for_chosen_device(
         previous = repository.load()
     except AppleTVError:
         return Settings.model_validate(device)
-    return previous.model_copy(update=device)
+    payload = previous.model_dump()
+    payload.update(device)
+    return Settings.model_validate(payload)

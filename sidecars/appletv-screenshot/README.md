@@ -60,7 +60,10 @@ appletv-screenshot configure --udid 00008110-000A1B2C3D4E5F60 --transport usersp
 ```
 
 With `--transport auto` (the default) the helper tries native on macOS, then userspace,
-then tunneld. On Linux and Windows it tries userspace, then tunneld.
+then tunneld. On Linux and Windows it tries userspace, then tunneld. If every attempt
+fails, `auto` reports the userspace outcome when userspace ran. Native pairing is a
+different credential domain and does not outrank a later userspace device or tunnel
+failure. Privileged tunneld remains a last operational fallback, not the normal path.
 
 ### native (macOS only)
 

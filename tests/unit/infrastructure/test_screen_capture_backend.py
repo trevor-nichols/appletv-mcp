@@ -25,6 +25,7 @@ from appletv_mcp.infrastructure.screen_capture import (
     run_helper_command,
 )
 from appletv_mcp.infrastructure.screen_capture.contract import (
+    AMBIGUOUS_DEVICE_MESSAGE,
     HELPER_MISSING_MESSAGE,
     INVALID_IMAGE_MESSAGE,
     PAIRING_REQUIRED_MESSAGE,
@@ -55,7 +56,7 @@ def _backend(
 
 def _temp_root(tmp_path: Path) -> Path:
     root = tmp_path / "temp-root"
-    root.mkdir()
+    root.mkdir(exist_ok=True)
     return root
 
 
@@ -169,10 +170,18 @@ async def test_exit_codes_map_to_domain_errors(
 
 
 async def test_spec_error_texts_are_used_verbatim(tmp_path: Path) -> None:
-    helper = install_fake_helper(tmp_path, f"exit:{int(HelperExitCode.PAIRING_REQUIRED)}")
+    pairing = install_fake_helper(
+        tmp_path, f"exit:{int(HelperExitCode.PAIRING_REQUIRED)}", name="helper-pairing"
+    )
     with pytest.raises(ScreenCapturePairingRequiredError) as info:
-        await _backend(helper, _temp_root(tmp_path)).capture()
+        await _backend(pairing, _temp_root(tmp_path)).capture()
     assert info.value.message == PAIRING_REQUIRED_MESSAGE
+    ambiguous = install_fake_helper(
+        tmp_path, f"exit:{int(HelperExitCode.AMBIGUOUS_DEVICE)}", name="helper-ambiguous"
+    )
+    with pytest.raises(ScreenCaptureFailedError) as ambiguous_info:
+        await _backend(ambiguous, _temp_root(tmp_path)).capture()
+    assert ambiguous_info.value.message == AMBIGUOUS_DEVICE_MESSAGE
     assert HELPER_MISSING_MESSAGE.startswith("Screen capture is unavailable")
     assert TIMEOUT_MESSAGE == "Apple TV screen capture timed out before a screenshot was returned."
 
@@ -223,7 +232,7 @@ async def test_timeout_kills_helper_that_ignores_sigterm(tmp_path: Path) -> None
 
 async def test_run_helper_command_cancellation_stops_child(tmp_path: Path) -> None:
     helper = install_fake_helper(tmp_path, "hang")
-    task = asyncio.create_task(run_helper_command(helper.executable, ["probe-hang"]))
+    task = asyncio.create_task(run_helper_command(helper.executable, ["--version"]))
     pid = await _wait_for_pid(helper)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

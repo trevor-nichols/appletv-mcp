@@ -223,7 +223,7 @@ Remote navigation is a last resort. Prefer `apple_tv_open_app`, playback, seek, 
 | Uncertain execution error | A non-idempotent command may have been delivered; it was not retried |
 | Screenshot: helper could not be found | Install `appletv-screenshot` or set `screen_capture.command` to its absolute path; `doctor` shows what the server resolves |
 | Screenshot: pairing required | Run `pymobiledevice3 remote pair` for the Apple TV (separate from `atvremote`). Userspace does not need a privileged tunneld |
-| Screenshot: helper found more than one Apple TV | `appletv-screenshot configure --udid <UDID>` |
+| Screenshot: helper does not have an unambiguous Apple TV target | `appletv-screenshot configure --udid <UDID>` |
 | Screenshot: timed out | Wake the TV, check the tunnel daemon, raise `screen_capture.timeout_seconds` (max 60) |
 | Screenshot is black | Protected content; the frame is real, the picture is withheld by the device |
 

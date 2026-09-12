@@ -16,11 +16,13 @@ from appletv_screenshot.errors import SidecarError
 from appletv_screenshot.exit_codes import ExitCode
 from appletv_screenshot.transport import (
     DeviceSession,
+    TransportFailure,
     classify_tunnel_error,
     most_specific,
     open_device,
     open_native,
     open_tunneld,
+    reported_capture_failure,
     transport_order,
 )
 from tests.fakes import FakeRsd, fake_session
@@ -66,6 +68,51 @@ def test_most_specific_keeps_order_on_ties_and_passes_single_through() -> None:
     assert most_specific([second]) is second
     with pytest.raises(ValueError, match="no failures"):
         most_specific([])
+
+
+def test_reported_capture_failure_prefers_userspace_once_it_ran() -> None:
+    native = TransportFailure(
+        Transport.NATIVE, SidecarError(ExitCode.PAIRING_REQUIRED, "pairing failed")
+    )
+    userspace = TransportFailure(
+        Transport.USERSPACE, SidecarError(ExitCode.DEVICE_NOT_FOUND, "not reachable")
+    )
+    tunneld = TransportFailure(
+        Transport.TUNNELD, SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "daemon down")
+    )
+    chosen = reported_capture_failure(Transport.AUTO, [native, userspace, tunneld])
+    assert chosen.exit_code is ExitCode.DEVICE_NOT_FOUND
+    assert chosen.detail == (
+        "native: pairing failed; userspace: not reachable; tunneld: daemon down"
+    )
+
+
+def test_reported_capture_failure_keeps_userspace_pairing() -> None:
+    userspace = TransportFailure(
+        Transport.USERSPACE, SidecarError(ExitCode.PAIRING_REQUIRED, "not paired")
+    )
+    tunneld = TransportFailure(
+        Transport.TUNNELD, SidecarError(ExitCode.DEVICE_NOT_FOUND, "no tunnel")
+    )
+    chosen = reported_capture_failure(Transport.AUTO, [userspace, tunneld])
+    assert chosen.exit_code is ExitCode.PAIRING_REQUIRED
+
+
+def test_reported_capture_failure_ranks_when_userspace_was_not_attempted() -> None:
+    native = TransportFailure(
+        Transport.NATIVE, SidecarError(ExitCode.PAIRING_REQUIRED, "pairing failed")
+    )
+    tunneld = TransportFailure(
+        Transport.TUNNELD, SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "daemon down")
+    )
+    chosen = reported_capture_failure(Transport.AUTO, [native, tunneld])
+    assert chosen.exit_code is ExitCode.PAIRING_REQUIRED
+    assert chosen.detail == "native: pairing failed; tunneld: daemon down"
+
+
+def test_reported_capture_failure_rejects_an_empty_list() -> None:
+    with pytest.raises(ValueError, match="no failures"):
+        reported_capture_failure(Transport.AUTO, [])
 
 
 class _NotFoundThroughTunnelError(UserspaceTunnelUnavailableError, DeviceNotFoundError):

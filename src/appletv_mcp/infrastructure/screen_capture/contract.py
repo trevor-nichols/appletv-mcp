@@ -47,6 +47,10 @@ PAIRING_REQUIRED_MESSAGE = (
 )
 TIMEOUT_MESSAGE = "Apple TV screen capture timed out before a screenshot was returned."
 INVALID_IMAGE_MESSAGE = "The screen-capture helper completed but did not return a valid PNG image."
+AMBIGUOUS_DEVICE_MESSAGE = (
+    "The screen-capture helper does not have an unambiguous Apple TV target. "
+    "Configure it with `appletv-screenshot configure --udid <udid>`."
+)
 
 _EXIT_ERRORS: dict[HelperExitCode, tuple[type[ScreenCaptureError], str]] = {
     HelperExitCode.USAGE: (
@@ -59,11 +63,7 @@ _EXIT_ERRORS: dict[HelperExitCode, tuple[type[ScreenCaptureError], str]] = {
         "The screen-capture helper could not find its configured Apple TV on the network. "
         "Check that the Apple TV is awake and that the helper targets the right device.",
     ),
-    HelperExitCode.AMBIGUOUS_DEVICE: (
-        ScreenCaptureFailedError,
-        "The screen-capture helper found more than one Apple TV and refused to guess. "
-        "Configure the helper with one device identifier.",
-    ),
+    HelperExitCode.AMBIGUOUS_DEVICE: (ScreenCaptureFailedError, AMBIGUOUS_DEVICE_MESSAGE),
     HelperExitCode.PAIRING_REQUIRED: (ScreenCapturePairingRequiredError, PAIRING_REQUIRED_MESSAGE),
     HelperExitCode.TUNNEL_UNAVAILABLE: (
         ScreenCaptureFailedError,

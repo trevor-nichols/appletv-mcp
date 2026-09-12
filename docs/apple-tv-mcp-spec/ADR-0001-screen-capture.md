@@ -16,7 +16,7 @@ pyatv's stable identifier and the helper's RemoteXPC UDID are different namespac
 
 ## Shape
 
-The helper offers four transports. `auto` tries native on macOS, then userspace, then tunneld. Other hosts try userspace, then tunneld. Privileged tunneld is last.
+The helper offers four transports. `auto` tries native on macOS, then userspace, then tunneld. Other hosts try userspace, then tunneld. Privileged tunneld is last. When every `auto` attempt fails, the helper reports the userspace outcome if userspace ran. Native pairing and userspace pairing are different credential domains. Native pairing does not outrank a later userspace device-not-found or tunnel failure.
 
 The userspace transport browses RemotePairing, selects the configured Apple TV, then attaches `UserspaceTun` and `UserspaceDialPlane`. It does not call `PreferredRsdTunnel` or `UserspaceRsdTunnel`.
 
