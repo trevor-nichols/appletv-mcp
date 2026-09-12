@@ -1,6 +1,40 @@
 # Apple TV MCP — Implementation Checklist
 
-**Status as of 2026-09-11:** software implementation, unit tests, MCP contract tests, and stdio transport tests are complete. Product naming is Apple TV MCP (`appletv-mcp` / `appletv_mcp`). **Live Apple TV validation was not executed** in this environment because no physical device was available.
+**Status as of 2026-09-12:** v0.1 software implementation, unit tests, MCP contract tests, and stdio transport tests are complete. v0.2 screen capture (`apple_tv_screenshot` plus the `appletv-screenshot` helper) is implemented and fake-tested; see the v0.2 section below. Product naming is Apple TV MCP (`appletv-mcp` / `appletv_mcp`). **Live Apple TV validation was not executed** for either version in this environment because no physical device was available.
+
+## v0.2 — Screen capture (`SPEC_v0.2.md`)
+
+Implemented and tested with fakes (no hardware):
+
+- [x] Domain: `CapturedScreen` (frozen, `image/png` only, non-empty bytes), `ScreenCaptureSettings` nested under `Settings.screen_capture` with defaults so v0.1 config files load unchanged, and the `ScreenCapture*` error family under a `ScreenCaptureError` base.
+- [x] Application: `ScreenCaptureBackend` port and `ScreenCaptureService` with its own `asyncio.Lock` (five concurrent captures observed to run one at a time).
+- [x] Infrastructure: `ExternalScreenCaptureBackend` spawns the helper with `create_subprocess_exec`, fixed argv, all streams `DEVNULL`, per-call temp dir removed in `finally`, timeout and cancel handled with terminate/wait/kill, PNG checked by signature, IHDR, and dimensions, size capped by `max_image_bytes`. `HelperExitCode` table and message mapping in `contract.py`.
+- [x] MCP: `apple_tv_screenshot`, no arguments, `structured_output=False`, returns one `ImageContent` via the SDK `Image` helper. Fourteen tools in the contract test; the output-schema assertion is relaxed only for this tool by name. Server instructions and the status/remote tool descriptions rewritten for point-in-time perception.
+- [x] Doctor: `SKIP` when the helper is missing, `OK` with dimensions after one real capture, `FAIL` with the helper error; never affects the exit code.
+- [x] Sidecar `sidecars/appletv-screenshot/` (separate `uv` project, own lockfile, not a workspace member): `capture --output PATH`, `configure`, `--version`; transports `auto` (native on macOS, then tunneld), `native`, `tunneld`; deterministic target selection (configured UDID or exactly one visible device); exit codes 0/2/10–17; 82 tests.
+- [x] Root drift test loads the helper's `exit_codes.py` by path and compares it with `HelperExitCode`.
+- [x] CI: separate sidecar job; root job builds the wheel and fails if it carries the sidecar or a `pymobiledevice3` requirement.
+- [x] Live test `tests/integration/live/test_live_screen_capture.py` (read-only, `APPLE_TV_INTEGRATION_TESTS=1`, skips without the helper).
+- [x] Docs: `AGENTS.md` §8/§9/§10/§10a/§22/§35/§37/§38, `README.md`, `SPEC.md` (§4, §5 real tree, §13, §14.14, §15, §17, §19.2, §20.5, §22–§24), `docs/references/README.md` and `MANIFEST.sha256`.
+- [x] Version `0.2.0` in `pyproject.toml`, `_version.py`, `uv.lock`, and the sidecar.
+
+Not executed (hardware-dependent). Do not tick without a real Apple TV:
+
+- [ ] `pymobiledevice3 remote pair` and `remote tunneld` (or the macOS native tunnel) against a tvOS 17+ Apple TV with Developer Mode and the DDI.
+- [ ] `appletv-screenshot capture --output ...` returns a real PNG; record the tvOS version, host OS, and that pymobiledevice3 11.12.4 worked.
+- [ ] `apple_tv_screenshot` through an MCP host renders the image.
+- [ ] screenshot → `apple_tv_press` → screenshot shows the change.
+- [ ] Protected playback returns a black frame and the tool still succeeds.
+- [ ] Helper survives a tunnel restart and an Apple TV reboot (next call succeeds or returns a clear `ToolError`).
+
+v0.2 deviations from `SPEC_v0.2.md`, all deliberate:
+
+- `ScreenCaptureError` base class added above the five specified errors so the MCP boundary and the exit-code map can name the family.
+- Exit code `17 CONFIG_INVALID` added to the helper contract; `appletv-screenshot configure` repairs an unreadable config from defaults.
+- Helper stderr is detached (`DEVNULL`) rather than captured: it may carry tracebacks with pairing paths, and exit codes are the API.
+- The helper offers no `devices` subcommand; the `AMBIGUOUS_DEVICE` message lists visible UDIDs and `pymobiledevice3 remote browse` exists.
+- Native-tunnel pairing failure is detected by the `pairing failed` message prefix of `UserspaceTunnelUnavailableError`, because pymobiledevice3 11.12.4 raises a private subclass on that path.
+- `pymobiledevice3==11.12.4` is the latest stable at the time of writing. No proof-of-concept pin was available to recover, so the pin is unverified on hardware.
 
 ## Current project state
 
@@ -1296,7 +1330,7 @@ Search repository for:
 
 ### 21.5 Release
 
-- [x] Set version `0.1.0`.
+- [x] Set version `0.1.0` (bumped to `0.2.0` with screen capture).
 - [ ] Tag release.
 - [x] Preserve pinned references used for implementation.
 - [ ] Record any upstream quirks discovered during live validation.
