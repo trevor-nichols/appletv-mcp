@@ -1,8 +1,14 @@
 <!-- mcp-name: io.github.trevor-nichols/appletv-mcp -->
 
-# Apple TV MCP
+# Apple TV MCP: A local MCP server that lets AI agents control — and see — your Apple TV
 
-**A local MCP server that lets AI agents control — and see — your Apple TV.**
+<p align="center">
+  <img
+    src="docs/assets/apple-tv-mcp-hero.png"
+    alt="Apple TV MCP — AI control and visual navigation for Apple TV"
+    width="100%"
+  />
+</p>
 
 Open apps, navigate tvOS, control playback, type searches, adjust volume, manage power, and take screenshots so a multimodal agent can actually inspect what happened.
 
