@@ -46,7 +46,7 @@ Recommended direct dependencies:
 ```toml
 [project]
 name = "appletv-mcp"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.14,<3.15"
 
 dependencies = [
@@ -249,6 +249,40 @@ Remote navigation is blind and non-idempotent.
                    Apple TV
 ```
 
+Screen capture (v0.2) is a second, independent path that shares nothing with the control
+stack except the composition root:
+
+```text
+             ┌─────────────────────┐
+             │      MCPServer      │
+             │ apple_tv_screenshot │
+             └─────────┬───────────┘
+                       │
+                       ▼
+             ┌─────────────────────┐
+             │ ScreenCaptureService│
+             │ one capture at a    │
+             │ time (own lock)     │
+             └─────────┬───────────┘
+                       │
+                       ▼
+             ┌─────────────────────┐
+             │ ExternalScreen-     │
+             │ CaptureBackend      │
+             │ spawn helper, read  │
+             │ PNG, map exit code  │
+             └─────────┬───────────┘
+                       │ subprocess, exit codes, one PNG file
+                       ▼
+             appletv-screenshot helper (separate project, pymobiledevice3)
+                       │ RemoteXPC / DVT
+                       ▼
+                   Apple TV
+```
+
+`pymobiledevice3` is never imported by `appletv_mcp`. The helper lives under
+`sidecars/appletv-screenshot/` with its own `pyproject.toml` and lockfile.
+
 ---
 
 ## 5. Repository Structure
@@ -259,31 +293,54 @@ appletv-mcp/
 ├── uv.lock
 ├── .python-version
 ├── README.md
-├── SPEC.md
-├── IMPLEMENTATION_CHECKLIST.md
+├── AGENTS.md
 │
-├── references/
-│   └── ...
+├── docs/
+│   ├── apple-tv-mcp-spec/
+│   │   ├── SPEC.md
+│   │   ├── SPEC_v0.2.md
+│   │   ├── ADR-0001-screen-capture.md
+│   │   └── IMPLEMENTATION_CHECKLIST.md
+│   └── references/
+│       └── ...
+│
+├── sidecars/
+│   └── appletv-screenshot/        # separate uv project, owns pymobiledevice3
+│       ├── pyproject.toml
+│       ├── uv.lock
+│       ├── src/appletv_screenshot/
+│       └── tests/
 │
 ├── src/
 │   └── appletv_mcp/
-│       ├── __init__.py
-│       ├── server.py
-│       ├── lifespan.py
-│       ├── controller.py
-│       ├── connection.py
-│       ├── config.py
-│       ├── models.py
-│       ├── errors.py
-│       └── cli.py
+│       ├── composition.py         # Runtime: settings, storage, connection, controller, screen capture
+│       ├── domain/
+│       │   ├── enums.py
+│       │   ├── errors.py
+│       │   └── models/            # settings, device, status, playback, capabilities, results, screen
+│       ├── application/
+│       │   ├── ports/             # AppleTVGateway, SettingsRepository, ScreenCaptureBackend
+│       │   ├── policies/          # capabilities, retry
+│       │   └── services/          # AppleTVController, app resolution, ScreenCaptureService
+│       ├── infrastructure/
+│       │   ├── config/            # paths, atomic settings repository
+│       │   ├── observability/     # logging, redaction
+│       │   ├── pyatv/             # discovery, connection manager, gateway, feature map, storage
+│       │   └── screen_capture/    # external helper backend, exit-code contract, PNG inspection
+│       └── interfaces/
+│           ├── mcp/
+│           │   ├── server.py, lifespan.py, context.py, instructions.py, errors.py
+│           │   └── tools/         # status, capabilities, apps, power, remote, playback, text, volume, screenshot
+│           └── cli/
+│               ├── main.py, rendering.py
+│               └── commands/      # configure, doctor, serve
 │
 └── tests/
     ├── conftest.py
-    ├── test_server.py
-    ├── test_controller.py
-    ├── test_connection.py
-    ├── test_models.py
-    └── test_tools.py
+    ├── helpers/                   # fakes, PNG fixtures, fake screenshot helper
+    ├── unit/                      # domain, application, infrastructure
+    ├── contract/                  # MCP tool contract, helper exit-code drift
+    └── integration/live/          # opt-in, needs hardware
 ```
 
 ---
@@ -620,7 +677,7 @@ Create an explicitly named and versioned server:
 ```python
 mcp = MCPServer(
     "appletv-mcp",
-    version="0.1.0",
+    version="0.2.0",
     instructions=SERVER_INSTRUCTIONS,
     lifespan=app_lifespan,
 )
@@ -644,7 +701,11 @@ The server should advertise instructions with these semantics:
 >
 > Prefer app launching, power, playback, seek, text, and volume tools over remote navigation.
 >
-> Remote button presses are blind and non-idempotent. The server cannot see the Apple TV screen or determine which UI element currently has focus.
+> The server does not continuously observe the Apple TV screen. `apple_tv_screenshot` returns one point-in-time PNG when the screen-capture helper is installed and paired; a screenshot is stale as soon as it is taken.
+>
+> Remote button presses remain blind and non-idempotent. Nothing reports which UI element has focus; inspect a screenshot instead of assuming.
+>
+> Protected video may render black in a screenshot. Black is not evidence that playback stopped.
 >
 > The app returned by status is the app associated with currently playing media. Do not interpret it as a guaranteed currently visible or foreground app.
 >
@@ -1151,6 +1212,46 @@ class VolumeAdjustResult(BaseModel):
 
 This tool is intentionally separate from `apple_tv_set_volume` because relative adjustment is non-idempotent.
 
+### 14.14 `apple_tv_screenshot` (v0.2)
+
+Input: none. Unknown arguments are ignored by the SDK for a no-argument tool.
+
+Output: exactly one native MCP `ImageContent` with `mimeType: image/png`, produced with the
+SDK `Image(data=..., format="png")` helper. The tool is registered with
+`structured_output=False`; it has no output schema and returns no `structuredContent`. It is
+the only tool in the inventory without an output schema, and the contract test asserts that
+exception by name.
+
+Annotations:
+
+```text
+read_only_hint=True
+destructive_hint=False
+idempotent_hint=True
+open_world_hint=False
+```
+
+Semantics:
+
+- One point-in-time capture. Nothing is cached or stored after the response.
+- The screen-capture helper (`appletv-screenshot`) runs as a one-shot subprocess with fixed
+  arguments, a private temporary output file, and all three standard streams detached.
+- Two agents calling at once queue on the service lock; each gets its own capture.
+- Protected video may render black. The server performs no black-frame detection and no DRM
+  circumvention.
+
+Errors, all `ToolError`:
+
+```text
+helper not installed        → ScreenCaptureUnavailableError
+developer pairing missing   → ScreenCapturePairingRequiredError
+capture exceeded timeout    → ScreenCaptureTimeoutError
+helper failed (exit code)   → ScreenCaptureFailedError
+output missing / not a PNG  → ScreenCaptureInvalidImageError
+```
+
+The full sidecar contract, exit codes, and configuration live in `SPEC_v0.2.md`.
+
 ---
 
 ## 15. Structured Result Models
@@ -1178,6 +1279,7 @@ SkipResult
 TextResult
 VolumeResult
 VolumeAdjustResult
+CapturedScreen          # internal: PNG bytes + mime type; the MCP tool returns ImageContent, not this model
 ```
 
 Use `Literal`, enums, `Field`, and optional fields deliberately so the generated MCP schemas constrain agent behavior.
@@ -1232,6 +1334,8 @@ Text input is unavailable because no text field is focused.
 Volume control is not supported by this device.
 The command timed out.
 The connection failed after the button may have been delivered; the command was not retried.
+Screen capture is unavailable because the configured screenshot helper could not be found.
+Screen capture requires developer/RemoteXPC pairing for the configured Apple TV.
 ```
 
 ### 17.2 `MCPError`
@@ -1340,9 +1444,13 @@ Example:
 ✓ Playback control available
 ✓ Keyboard currently unavailable
 ✓ Volume control available
+SKIP Screen capture: optional backend not available (appletv-screenshot not found)
 ```
 
-The command must exit non-zero when a required prerequisite fails.
+The command must exit non-zero when a required prerequisite fails. Screen capture is
+optional: a missing helper is `SKIP`, an installed helper is exercised once and reported as
+`OK` with the PNG dimensions or `FAIL` with the capture error, and neither changes the exit
+code.
 
 ### 19.3 `serve`
 
@@ -1447,6 +1555,8 @@ Potential live tests:
 - List apps.
 - Verify power state.
 - Perform one safe idempotent operation.
+- Capture one screenshot through the installed helper and check it is a PNG with dimensions
+  (read-only; skips when the helper is not installed).
 - Optionally exercise non-idempotent controls only in a manually invoked suite.
 
 ---
@@ -1479,7 +1589,8 @@ Live Apple TV integration tests remain opt-in.
 
 Do not implement in v0.1:
 
-- Screen capture.
+- Screen capture. (Added in v0.2 as a single-screenshot primitive, §14.14. OCR, UI hierarchy
+  extraction, and visual automation stay out of scope; see `SPEC_v0.2.md` §38.)
 - Screen OCR.
 - Detection of currently highlighted UI controls.
 - General visual UI automation.
@@ -1502,7 +1613,9 @@ These may be added later without changing the core semantic controller contract.
 
 ## 23. Known Perception Limitation
 
-The agent does not see the Apple TV screen.
+The agent does not continuously observe the Apple TV screen. Since v0.2 it can request one
+point-in-time PNG through `apple_tv_screenshot` when the screen-capture helper is installed
+and paired. Between screenshots it is blind again.
 
 `pyatv` exposes useful device, media, application, keyboard, audio, and playback state, but it does not provide a general representation of:
 
@@ -1514,7 +1627,8 @@ UI hierarchy
 foreground application in every state
 ```
 
-Therefore the agent must prefer semantic actions where available.
+Therefore the agent must prefer semantic actions where available, and inspect a fresh
+screenshot rather than assume what a blind navigation sequence did.
 
 Do not make claims such as:
 
@@ -1524,13 +1638,16 @@ Do not make claims such as:
 "The movie successfully started playing."
 ```
 
-unless observable `pyatv` state actually supports the claim.
+unless observable `pyatv` state or a screenshot taken after the action actually supports the
+claim. A black screenshot during protected playback is not evidence that playback stopped.
 
 ---
 
 ## 24. Future Extensions
 
-### v0.2 — Shared Local Daemon
+v0.2 shipped screen capture (§14.14, `SPEC_v0.2.md`). The items below are unscheduled.
+
+### Shared Local Daemon
 
 Add optional localhost Streamable HTTP:
 
@@ -1545,7 +1662,7 @@ Purpose:
 
 Default may remain stdio.
 
-### v0.3 — Multiple Apple TVs
+### Multiple Apple TVs
 
 Introduce named profiles:
 
@@ -1559,7 +1676,7 @@ Only then should tools gain a target-device argument.
 
 Do not burden v0.1 schemas with unused device parameters.
 
-### v0.4 — Higher-Level Agent Actions
+### Higher-Level Agent Actions
 
 Potential composed tools:
 

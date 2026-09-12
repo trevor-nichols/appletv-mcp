@@ -6,23 +6,28 @@ from pathlib import Path
 
 import pytest
 from pyatv.interface import Storage
+from pydantic import ValidationError
 
 from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from appletv_mcp.application.services.screen_capture import ScreenCaptureService
 from appletv_mcp.composition import Runtime
 from appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
+from appletv_mcp.domain.models.settings import ScreenCaptureSettings
 from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
 from appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
 from appletv_mcp.interfaces.cli.commands.configure import (
     ConfigureError,
     _apple_tv_candidates,
+    _settings_for_chosen_device,
     run_configure,
 )
 from appletv_mcp.interfaces.cli.commands.doctor import run_doctor
 from appletv_mcp.interfaces.cli.main import main
 from tests.helpers.factories import make_settings
 from tests.helpers.fakes import FakeGateway, discovered
+from tests.helpers.screen_capture import FakeScreenCaptureBackend
 
 
 async def test_configure_saves_selected_device(
@@ -90,6 +95,110 @@ async def test_configure_saves_selected_device(
     assert saved.device_identifier == device.identifier
     assert saved.preferred_host == device.address
     assert "Capability summary" in stdout.getvalue()
+
+
+async def test_configure_preserves_screen_capture_and_command_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    repo.save(
+        make_settings(
+            command_timeout_seconds=22.5,
+            screen_capture=ScreenCaptureSettings(
+                command="/opt/appletv-screenshot",
+                timeout_seconds=41.0,
+                max_image_bytes=1024,
+            ),
+        )
+    )
+    device = discovered(name="Bedroom", identifier="DE:AD:BE:EF:00:01", address="10.0.0.8")
+    stdout = StringIO()
+
+    async def fake_scan(
+        self: object,
+        *,
+        timeout: float,
+        identifier: str | None = None,
+        hosts: Sequence[str] | None = None,
+    ) -> list[DiscoveredDevice]:
+        return [device]
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvScanner.scan",
+        fake_scan,
+    )
+
+    class DummyStorage:
+        async def load(self) -> object:
+            return object()
+
+        async def close(self) -> None:
+            return None
+
+    def fake_storage(path: Path | None = None) -> DummyStorage:
+        return DummyStorage()
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvStorageAdapter",
+        fake_storage,
+    )
+
+    class DummyRuntime:
+        def __init__(self) -> None:
+            self.controller = AppleTVController(FakeGateway())
+
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_create_runtime(**_kwargs: object) -> DummyRuntime:
+        return DummyRuntime()
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.create_runtime",
+        fake_create_runtime,
+    )
+
+    code = await run_configure(
+        stdin=StringIO(),
+        stdout=stdout,
+        settings_repository=repo,
+        selector=lambda devices: devices[0],
+    )
+    assert code == 0
+    saved = repo.load()
+    assert saved.device_identifier == device.identifier
+    assert saved.device_name == "Bedroom"
+    assert saved.preferred_host == "10.0.0.8"
+    assert saved.command_timeout_seconds == 22.5
+    assert saved.screen_capture.command == "/opt/appletv-screenshot"
+    assert saved.screen_capture.timeout_seconds == 41.0
+    assert saved.screen_capture.max_image_bytes == 1024
+
+
+def test_settings_for_chosen_device_keeps_screen_capture_and_rejects_invalid_host(
+    tmp_path: Path,
+) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    repo.save(
+        make_settings(
+            command_timeout_seconds=22.5,
+            screen_capture=ScreenCaptureSettings(
+                command="/opt/appletv-screenshot",
+                timeout_seconds=41.0,
+                max_image_bytes=1024,
+            ),
+        )
+    )
+    chosen = discovered(name="Bedroom", identifier="DE:AD:BE:EF:00:01", address="10.0.0.8")
+    settings = _settings_for_chosen_device(repo, chosen, 7.0)
+    assert settings.device_identifier == chosen.identifier
+    assert settings.preferred_host == "10.0.0.8"
+    assert settings.scan_timeout_seconds == 7.0
+    assert settings.command_timeout_seconds == 22.5
+    assert settings.screen_capture.command == "/opt/appletv-screenshot"
+    assert settings.screen_capture.timeout_seconds == 41.0
+    with pytest.raises(ValidationError, match="IPv4"):
+        _settings_for_chosen_device(repo, discovered(address="living-room.local"), 5.0)
 
 
 def test_configure_candidates_ignore_known_non_tv_devices() -> None:
@@ -261,6 +370,7 @@ async def test_run_doctor_uses_preferred_host_when_multicast_fails(tmp_path: Pat
         storage=storage,
         connection_manager=manager,
         controller=AppleTVController(FakeGateway()),
+        screen_capture=ScreenCaptureService(FakeScreenCaptureBackend()),
     )
 
     async def factory() -> Runtime:
@@ -295,7 +405,7 @@ def test_cli_help_and_unknown(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["--version"])
     assert exc_info.value.code == 0
-    assert capsys.readouterr().out.strip() == "appletv-mcp 0.1.0"
+    assert capsys.readouterr().out.strip() == "appletv-mcp 0.2.0"
 
     with pytest.raises(SystemExit) as exc_info:
         main(["nope"])

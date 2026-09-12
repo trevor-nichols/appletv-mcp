@@ -15,13 +15,15 @@ from appletv_mcp.domain.models.results import (
     VolumeAdjustResult,
     VolumeResult,
 )
-from appletv_mcp.domain.models.settings import Settings
+from appletv_mcp.domain.models.screen import CapturedScreen
+from appletv_mcp.domain.models.settings import ScreenCaptureSettings, Settings
 from appletv_mcp.domain.models.status import AppleTVStatus
 
 __all__ = [
     "AppInfo",
     "AppleTVCapabilities",
     "AppleTVStatus",
+    "CapturedScreen",
     "DeviceInfo",
     "OpenAppResult",
     "OpenUrlResult",
@@ -29,6 +31,7 @@ __all__ = [
     "PlaybackResult",
     "PowerResult",
     "PressResult",
+    "ScreenCaptureSettings",
     "SeekResult",
     "Settings",
     "SkipResult",

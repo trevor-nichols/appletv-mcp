@@ -50,8 +50,10 @@ Before modifying code, inspect the repository and read the project documentation
 At minimum, read:
 
 ```text
+docs/apple-tv-mcp-spec/SPEC_v0.2.md
 docs/apple-tv-mcp-spec/SPEC.md
 docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md
+docs/apple-tv-mcp-spec/ADR-0001-screen-capture.md
 ```
 
 Also inspect the pinned reference corpus under:
@@ -66,6 +68,7 @@ The reference corpus should include material for:
 pyatv 0.18.0
 MCP Python SDK 2.2.0
 MCP protocol 2026-07-28
+pymobiledevice3 11.12.4 (sidecar only, docs/references/pymobiledevice3/)
 ```
 
 Do not implement from memory when an exact upstream API is available in the pinned references.
@@ -78,13 +81,16 @@ If file paths differ slightly, locate the actual files rather than assuming they
 
 When sources disagree, use this precedence:
 
-1. `docs/apple-tv-mcp-spec/SPEC.md` — product behavior, architecture intent, and public contracts.
-2. `AGENTS.md` — repository-wide implementation rules.
-3. `docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md` — build order and completeness tracking.
-4. Pinned `pyatv 0.18.0` references — exact `pyatv` APIs and behavior.
-5. Pinned MCP Python SDK 2.2.0 references — exact SDK APIs and behavior.
-6. MCP 2026-07-28 specification — protocol semantics.
-7. Tests in this repository.
+1. `docs/apple-tv-mcp-spec/SPEC_v0.2.md` for screen-capture behavior, the sidecar contract, and `apple_tv_screenshot`.
+2. `docs/apple-tv-mcp-spec/SPEC.md` for inherited v0.1 control behavior, architecture intent, and the rest of the public MCP contract.
+3. `AGENTS.md` for repository-wide implementation rules.
+4. `docs/apple-tv-mcp-spec/IMPLEMENTATION_CHECKLIST.md` for build order and completeness tracking.
+5. `docs/apple-tv-mcp-spec/ADR-0001-screen-capture.md` for v0.2 transport and identity decisions.
+6. Pinned `pyatv 0.18.0` references for exact `pyatv` APIs and behavior.
+7. Pinned MCP Python SDK 2.2.0 references for exact SDK APIs and behavior.
+8. Pinned `pymobiledevice3` 11.12.4 references and the installed sidecar package for helper transport APIs. Never import this library from `appletv_mcp`.
+9. MCP 2026-07-28 specification for protocol semantics.
+10. Tests in this repository.
 
 If pinned upstream behavior conflicts with an assumption in the spec:
 
@@ -107,6 +113,7 @@ Python            3.14.7
 pyatv             0.18.0
 MCP Python SDK    2.2.0
 Package manager   uv
+Sidecar           pymobiledevice3 11.12.4 (sidecars/appletv-screenshot only)
 ```
 
 Use stable releases only.
@@ -301,7 +308,7 @@ Group by responsibility.
 
 ## 8. Public MCP Contract
 
-The v0.1 MCP surface is exactly:
+The v0.2 MCP surface is exactly:
 
 ```text
 apple_tv_status
@@ -317,15 +324,21 @@ apple_tv_skip
 apple_tv_set_text
 apple_tv_set_volume
 apple_tv_adjust_volume
+apple_tv_screenshot
 ```
+
+`apple_tv_screenshot` takes no arguments and returns one native MCP `ImageContent`
+(`image/png`) built with the SDK `Image` helper. It is registered with
+`structured_output=False` and is the only tool without an output schema. Do not weaken
+the output-schema assertion for the other thirteen tools to accommodate it.
 
 Do not add speculative MCP tools without updating the spec.
 
-Do not expose raw `pyatv` operations or protocol names.
+Do not expose raw `pyatv` or `pymobiledevice3` operations or protocol names.
 
-Do not expose pairing as an MCP tool.
+Do not expose pairing (Companion or RemoteXPC) as an MCP tool.
 
-Do not add a device selector argument in v0.1.
+Do not add a device selector argument.
 
 Do not casually rename tool parameters or result fields after contract tests exist.
 
@@ -358,9 +371,12 @@ select
 
 Remote navigation is blind and non-idempotent.
 
-The agent cannot see the Apple TV screen.
+The agent does not watch the Apple TV screen. It can request one point-in-time PNG through
+`apple_tv_screenshot` when the optional helper is installed and paired; that image is stale
+as soon as it is returned.
 
-Never imply visual state that cannot be observed.
+Never imply visual state that cannot be observed. A claim about what is on screen needs
+either observable `pyatv` state or a screenshot taken after the action.
 
 ---
 
@@ -392,9 +408,51 @@ Do not claim:
 "The movie visibly started."
 ```
 
-unless actual observable device state supports the claim.
+unless actual observable device state or a fresh screenshot supports the claim.
 
 Missing metadata should generally become `None`, not fabricated values.
+
+Do not add screenshot availability to `apple_tv_capabilities` or `apple_tv_status`. Those
+report `pyatv` state; screen capture is a separate path with its own errors.
+
+---
+
+## 10a. Screen Capture Boundary
+
+Screen capture is observation, not control. Keep the two apart:
+
+```text
+control      AppleTVController → PyAtvGateway → ConnectionManager → pyatv
+observation  ScreenCaptureService → ExternalScreenCaptureBackend → appletv-screenshot helper
+```
+
+They meet only in `composition.py` and the MCP lifespan context.
+
+Hard boundary: `appletv_mcp` must never import `pymobiledevice3`, and it must not appear in
+the root `pyproject.toml` or `uv.lock`. The helper lives in `sidecars/appletv-screenshot/`
+as a separate `uv` project (not a workspace member) with its own lockfile and gates.
+
+The helper contract is exit codes plus one PNG at `--output PATH`. Do not parse helper
+stderr as an API. `HelperExitCode` in `infrastructure/screen_capture/contract.py` and the
+helper's `exit_codes.py` must stay identical; `tests/contract/test_helper_contract.py`
+compares them.
+
+Rules for the backend:
+
+- `asyncio.create_subprocess_exec`, never a shell, fixed argument list.
+- All three standard streams detached (`DEVNULL`). MCP stdio owns the parent's stdout.
+- Per-call private temporary directory, removed in `finally`.
+- Timeout and cancellation stop the helper with terminate, wait, kill.
+- Validate PNG structure without Pillow. Require the signature, IHDR first, at least
+  one IDAT, a complete IEND, and positive dimensions. Enforce `max_image_bytes`.
+  Do not check CRCs or decode pixels.
+- Screenshots are ephemeral. Never cache, persist, or log image bytes.
+- No black-frame heuristics and no DRM circumvention. A black frame is returned as captured.
+- Capture is lazy. The MCP process starts and controls the TV with no helper installed.
+  `doctor` reports `SKIP` for a missing helper, an optional `FAIL` for a helper contract
+  mismatch or missing capture UDID, and never fails the process on those optional checks.
+- One capture at a time through the service's own `asyncio.Lock`, not the controller's
+  command lock.
 
 ---
 
@@ -827,7 +885,11 @@ pairing blobs
 raw storage
 passwords
 keyboard text
+screenshot bytes
+helper stdout/stderr
 ```
+
+Log a screenshot only as its byte count and dimensions.
 
 Centralize redaction when necessary.
 
@@ -1292,8 +1354,9 @@ It should cover:
 - Development.
 - Tests.
 - Optional live tests.
+- Screen capture setup, its separate pairing, and its limits (point-in-time, black frames).
 
-Do not imply screen visibility or foreground-app knowledge.
+Do not imply continuous screen visibility or foreground-app knowledge.
 
 ---
 
@@ -1322,13 +1385,17 @@ uv run pyright
 uv run pytest
 ```
 
+Run the same five commands inside `sidecars/appletv-screenshot/`.
+
 Also run:
 
 ```bash
 git diff --check
+uv build --wheel
 ```
 
-when Git is available.
+when Git is available, and confirm the wheel contains no `sidecars/` or
+`appletv_screenshot` files and no `pymobiledevice3` requirement.
 
 Do not weaken lint/type configuration to make failures disappear.
 
@@ -1349,6 +1416,8 @@ print(
 type: ignore
 noqa
 Any
+pymobiledevice3      (must never be imported under src/appletv_mcp)
+shell=True
 ```
 
 Review every result.
@@ -1364,6 +1433,7 @@ pairing data
 tokens
 raw storage
 keyboard text
+screenshot files or image bytes in tests or fixtures (use a generated PNG, never a real capture)
 ```
 
 Ensure nothing sensitive was accidentally committed or logged.

@@ -5,6 +5,49 @@ from ipaddress import IPv4Address
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+DEFAULT_SCREEN_CAPTURE_COMMAND = "appletv-screenshot"
+
+
+class ScreenCaptureSettings(BaseModel):
+    """How the optional external screen-capture helper is invoked.
+
+    Only invocation parameters live here. RemoteXPC pairing material belongs to
+    the helper's own storage and never enters this file.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    command: str = Field(
+        default=DEFAULT_SCREEN_CAPTURE_COMMAND,
+        min_length=1,
+        description="Executable name on PATH or absolute path of the screenshot helper.",
+    )
+    timeout_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        le=60,
+        description="Wall-clock budget for one capture, including helper startup.",
+    )
+    max_image_bytes: int = Field(
+        default=33_554_432,
+        gt=0,
+        description="Largest PNG accepted from the helper, in bytes.",
+    )
+
+    @field_validator("command")
+    @classmethod
+    def command_must_not_be_blank(cls, value: str) -> str:
+        if not value:
+            raise ValueError("screen_capture.command must not be empty")
+        return value
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def timeout_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("screen_capture.timeout_seconds must be finite")
+        return value
+
 
 class Settings(BaseModel):
     """Device profile used to find and reconnect to one Apple TV."""
@@ -32,6 +75,10 @@ class Settings(BaseModel):
         default=10.0,
         gt=0,
         description="Per-command device timeout in seconds.",
+    )
+    screen_capture: ScreenCaptureSettings = Field(
+        default_factory=ScreenCaptureSettings,
+        description="Optional external screen-capture helper configuration.",
     )
 
     @field_validator("device_identifier")

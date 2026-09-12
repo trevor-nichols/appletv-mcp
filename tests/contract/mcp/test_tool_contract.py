@@ -1,17 +1,23 @@
 """MCP public contract tests using the in-memory client."""
 
+import base64
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp import Client
 from mcp.server import MCPServer
-from mcp.types import ListToolsResult, TextContent, Tool, ToolAnnotations
+from mcp.types import ImageContent, ListToolsResult, TextContent, Tool, ToolAnnotations
 
 from appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from appletv_mcp.application.services.screen_capture import ScreenCaptureService
+from appletv_mcp.domain.errors import ScreenCaptureUnavailableError
+from appletv_mcp.infrastructure.screen_capture.contract import HELPER_MISSING_MESSAGE
 from appletv_mcp.interfaces.mcp.lifespan import AppContext
 from appletv_mcp.interfaces.mcp.server import create_mcp_server
 from tests.helpers.fakes import FakeGateway
+from tests.helpers.png import FAKE_SCREEN_PNG
+from tests.helpers.screen_capture import FakeScreenCaptureBackend
 
 EXPECTED_TOOLS = [
     "apple_tv_status",
@@ -27,16 +33,23 @@ EXPECTED_TOOLS = [
     "apple_tv_set_text",
     "apple_tv_set_volume",
     "apple_tv_adjust_volume",
+    "apple_tv_screenshot",
 ]
 
+IMAGE_TOOLS = {"apple_tv_screenshot"}
 
-def _server(gateway: FakeGateway | None = None) -> tuple[MCPServer[AppContext], FakeGateway]:
+
+def _server(
+    gateway: FakeGateway | None = None,
+    screen_backend: FakeScreenCaptureBackend | None = None,
+) -> tuple[MCPServer[AppContext], FakeGateway]:
     fake = gateway or FakeGateway()
     controller = AppleTVController(fake)
+    screen_capture = ScreenCaptureService(screen_backend or FakeScreenCaptureBackend())
 
     @asynccontextmanager
     async def lifespan(_server: MCPServer[AppContext]) -> AsyncIterator[AppContext]:
-        yield AppContext(controller=controller)
+        yield AppContext(controller=controller, screen_capture=screen_capture)
 
     return create_mcp_server(lifespan=lifespan), fake
 
@@ -84,7 +97,74 @@ async def test_each_tool_has_description_and_output_schema() -> None:
     for tool in listed.tools:
         assert tool.description
         assert tool.input_schema["type"] == "object"
-        assert tool.output_schema is not None
+        if tool.name in IMAGE_TOOLS:
+            assert tool.output_schema is None, tool.name
+        else:
+            assert tool.output_schema is not None, tool.name
+
+
+async def test_screenshot_tool_shape() -> None:
+    server, _ = _server()
+    async with Client(server, raise_exceptions=True) as client:
+        tools = _tool_map(await client.list_tools())
+    assert EXPECTED_TOOLS.count("apple_tv_screenshot") == 1
+    tool = tools["apple_tv_screenshot"]
+    assert tool.input_schema.get("properties", {}) == {}
+    assert tool.input_schema.get("required") in (None, [])
+    assert tool.output_schema is None
+    assert tool.annotations == ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    )
+    assert tool.description is not None
+    assert "point-in-time" in tool.description
+    assert "black" in tool.description
+
+
+async def test_screenshot_returns_one_png_image_content() -> None:
+    backend = FakeScreenCaptureBackend()
+    server, gateway = _server(screen_backend=backend)
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("apple_tv_screenshot", {})
+    assert result.is_error is False
+    assert result.structured_content is None
+    assert len(result.content) == 1
+    block = result.content[0]
+    assert isinstance(block, ImageContent)
+    assert block.mime_type == "image/png"
+    assert base64.b64decode(block.data, validate=True) == FAKE_SCREEN_PNG
+    assert backend.calls == 1
+    assert gateway.calls == []
+
+
+async def test_screenshot_unavailable_becomes_tool_error() -> None:
+    backend = FakeScreenCaptureBackend(
+        fail_with=ScreenCaptureUnavailableError(HELPER_MISSING_MESSAGE)
+    )
+    server, gateway = _server(screen_backend=backend)
+    async with Client(server) as client:
+        result = await client.call_tool("apple_tv_screenshot", {})
+    assert result.is_error is True
+    assert result.structured_content is None
+    assert len(result.content) == 1
+    block = result.content[0]
+    assert isinstance(block, TextContent)
+    assert HELPER_MISSING_MESSAGE in block.text
+    assert "Traceback" not in block.text
+    assert gateway.calls == []
+
+
+async def test_server_instructions_describe_screenshot_semantics() -> None:
+    server, _ = _server()
+    async with Client(server, raise_exceptions=True) as client:
+        instructions = client.instructions
+    assert instructions is not None
+    assert "apple_tv_screenshot" in instructions
+    assert "point-in-time" in instructions
+    assert "black" in instructions
+    assert "cannot see the Apple TV screen" not in instructions
 
 
 async def test_read_only_annotations() -> None:
@@ -179,6 +259,7 @@ async def test_structured_status_and_capabilities() -> None:
     assert "active_app" not in status.structured_content
     assert caps.structured_content is not None
     assert caps.structured_content["play"] == "available"
+    assert "screenshot" not in caps.structured_content
 
 
 async def test_tool_error_sets_is_error() -> None:

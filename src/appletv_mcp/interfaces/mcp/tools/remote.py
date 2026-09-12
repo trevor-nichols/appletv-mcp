@@ -1,4 +1,4 @@
-"""Blind remote navigation. Prefer semantic tools when they are available."""
+"""Remote navigation without feedback. Prefer semantic tools when they are available."""
 
 from typing import Annotated
 
@@ -36,10 +36,11 @@ def register(mcp: MCPServer[AppContext]) -> None:
             Field(ge=1, le=10, description="Number of sequential presses."),
         ] = 1,
     ) -> PressResult:
-        """Press a remote button. Navigation is blind and non-idempotent.
+        """Press a remote button. Navigation is non-idempotent.
 
-        The server cannot see the Apple TV screen or which UI element has focus.
-        Uncertain transport failures are not retried automatically.
+        The press itself has no visual feedback and does not report which UI element
+        has focus. Use apple_tv_screenshot separately when visible UI state needs to be
+        inspected or verified. Uncertain transport failures are not retried automatically.
         """
 
         return await run_tool(lambda: controller(ctx).press(button, action, count))

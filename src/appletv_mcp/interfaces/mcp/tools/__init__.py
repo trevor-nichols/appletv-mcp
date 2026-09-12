@@ -1,10 +1,10 @@
-"""Register v0.1 MCP tools on a server instance."""
+"""Register the public MCP tools on a server instance."""
 
 from mcp.server import MCPServer
 
 from appletv_mcp.interfaces.mcp.lifespan import AppContext
 
-from . import capabilities, playback, power, remote, status, text, volume
+from . import capabilities, playback, power, remote, screenshot, status, text, volume
 from .apps import register_launch, register_list
 
 
@@ -18,3 +18,4 @@ def register_all(mcp: MCPServer[AppContext]) -> None:
     playback.register(mcp)
     text.register(mcp)
     volume.register(mcp)
+    screenshot.register(mcp)

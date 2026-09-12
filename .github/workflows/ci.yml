@@ -23,3 +23,47 @@ jobs:
         run: uv run pyright
       - name: Pytest
         run: uv run pytest
+      - name: Build
+        run: uv build
+      - name: Artifacts exclude the sidecar and pymobiledevice3
+        run: |
+          uv run python - <<'EOF'
+          import glob, tarfile, zipfile
+          [wheel] = glob.glob("dist/appletv_mcp-*.whl")
+          names = zipfile.ZipFile(wheel).namelist()
+          leaked = [n for n in names if "sidecar" in n or "appletv_screenshot" in n]
+          metadata = next(n for n in names if n.endswith("METADATA"))
+          text = zipfile.ZipFile(wheel).read(metadata).decode()
+          requires_dist = [line for line in text.splitlines() if line.startswith("Requires-Dist:")]
+          assert not leaked, leaked
+          # Hatch copies README.md into METADATA. The description names the helper
+          # on purpose. The dependency line is the leak to forbid.
+          assert all("pymobiledevice3" not in line for line in requires_dist), requires_dist
+          [sdist] = glob.glob("dist/appletv_mcp-*.tar.gz")
+          sdist_leaked = [n for n in tarfile.open(sdist).getnames() if "/sidecars/" in n]
+          assert not sdist_leaked, sdist_leaked
+          print(f"{wheel}: {len(names)} files; {sdist}: no sidecar, no pymobiledevice3 requirement")
+          EOF
+
+  sidecar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecars/appletv-screenshot
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14.7"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Pyright
+        run: uv run pyright
+      - name: Pytest
+        run: uv run pytest
+      - name: Helper answers --version
+        run: uv run appletv-screenshot --version

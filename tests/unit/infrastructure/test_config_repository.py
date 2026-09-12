@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from appletv_mcp.domain.errors import ConfigurationError, DeviceNotConfiguredError
+from appletv_mcp.domain.models.settings import ScreenCaptureSettings
 from appletv_mcp.infrastructure.config.paths import CONFIG_DIR_ENV, config_dir
 from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 from tests.helpers.factories import make_settings
@@ -67,6 +68,45 @@ def test_atomic_replacement(tmp_path: Path) -> None:
     assert repo.load().device_name == "Two"
     leftovers = list(tmp_path.glob(".config.json.*.tmp"))
     assert leftovers == []
+
+
+def test_v01_config_file_loads_with_default_screen_capture(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "device_identifier": "AA:BB:CC:DD:EE:FF",
+                "device_name": "Living Room",
+                "preferred_host": "192.168.1.50",
+                "scan_timeout_seconds": 5.0,
+                "command_timeout_seconds": 10.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = FileSettingsRepository(path).load()
+    assert loaded.screen_capture.command == "appletv-screenshot"
+    assert loaded.screen_capture.timeout_seconds == 20.0
+
+
+def test_screen_capture_settings_persist_without_secrets(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    repo = FileSettingsRepository(path)
+    settings = make_settings().model_copy(
+        update={
+            "screen_capture": ScreenCaptureSettings(
+                command="/opt/bin/appletv-screenshot", timeout_seconds=8
+            )
+        }
+    )
+    repo.save(settings)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["screen_capture"] == {
+        "command": "/opt/bin/appletv-screenshot",
+        "timeout_seconds": 8.0,
+        "max_image_bytes": 33_554_432,
+    }
+    assert repo.load().screen_capture.command == "/opt/bin/appletv-screenshot"
 
 
 def test_preferred_host_update(tmp_path: Path) -> None:

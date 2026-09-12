@@ -19,7 +19,8 @@ def register(mcp: MCPServer[AppContext]) -> None:
         """Read current device, power, playback, volume, and keyboard state.
 
         media_app is the application associated with currently playing media, not a
-        guaranteed foreground or visible application. The server cannot see the screen.
+        guaranteed foreground or visible application. Status does not capture the
+        screen; use apple_tv_screenshot to inspect what is currently rendered.
         """
 
         return await run_tool(controller(ctx).status)
