@@ -9,6 +9,7 @@ from pyatv.interface import Storage
 
 from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
 from appletv_mcp.application.services.apple_tv_controller import AppleTVController
+from appletv_mcp.application.services.screen_capture import ScreenCaptureService
 from appletv_mcp.composition import Runtime
 from appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
 from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
@@ -23,6 +24,7 @@ from appletv_mcp.interfaces.cli.commands.doctor import run_doctor
 from appletv_mcp.interfaces.cli.main import main
 from tests.helpers.factories import make_settings
 from tests.helpers.fakes import FakeGateway, discovered
+from tests.helpers.screen_capture import FakeScreenCaptureBackend
 
 
 async def test_configure_saves_selected_device(
@@ -261,6 +263,7 @@ async def test_run_doctor_uses_preferred_host_when_multicast_fails(tmp_path: Pat
         storage=storage,
         connection_manager=manager,
         controller=AppleTVController(FakeGateway()),
+        screen_capture=ScreenCaptureService(FakeScreenCaptureBackend()),
     )
 
     async def factory() -> Runtime:
