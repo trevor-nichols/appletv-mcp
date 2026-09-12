@@ -1,18 +1,21 @@
 """Reach the configured Apple TV's RemoteXPC service discovery (RSD).
 
-Two transports are supported, both grounded in pymobiledevice3 11.12.4:
+Four transports, grounded in pymobiledevice3 11.12.4:
 
-native   macOS only. Rides Apple's own `remoted` tunnel through `remotepairingd`
-         (`NativeRemotedTunnel`). No root. Pairing is Apple's, not pymobiledevice3's.
-tunneld  Any OS. Reuses a running `sudo pymobiledevice3 remote tunneld`, which
-         pairs Wi-Fi devices with the record written by `pymobiledevice3 remote pair`.
+native     macOS only. Rides Apple's `remoted` tunnel (`NativeRemotedTunnel`).
+userspace  Any OS. In-process PyTCP tunnel over RemotePairing bonjour. No root,
+           no usbmux, no `tunneld`. This is the no-root path for a Wi-Fi Apple TV.
+tunneld    Any OS. Reuses a running `sudo pymobiledevice3 remote tunneld`.
+auto       native (macOS only), then userspace, then tunneld.
 
-The in-process userspace tunnel is not offered: it needs usbmux, which a Wi-Fi
-Apple TV does not provide.
+`PreferredRsdTunnel` is not used as the auto policy. In 11.12.4 it wraps
+`UserspaceRsdTunnel`, which calls `create_using_usbmux` before RemotePairing, so a
+Wi-Fi Apple TV never reaches the working path. Device selection also stays here
+so capture cannot follow `serial=None` (first device).
 """
 
 import platform
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -30,7 +33,7 @@ from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscove
 from appletv_screenshot.config import SidecarConfig, Transport
 from appletv_screenshot.errors import SidecarError
 from appletv_screenshot.exit_codes import ExitCode
-from appletv_screenshot.target import Candidate, select_target
+from appletv_screenshot.target import require_apple_tv_product, require_configured_udid
 
 # pymobiledevice3 11.12.4 reports a refused/unpaired native tunnel as a
 # UserspaceTunnelUnavailableError whose message starts with this text.
@@ -62,12 +65,13 @@ def transport_order(preference: Transport, system: str | None = None) -> list[Tr
     current = system or platform.system()
     if preference is Transport.AUTO:
         order = [Transport.NATIVE] if current == "Darwin" else []
+        order.append(Transport.USERSPACE)
         order.append(Transport.TUNNELD)
         return order
     if preference is Transport.NATIVE and current != "Darwin":
         raise SidecarError(
             ExitCode.TUNNEL_UNAVAILABLE,
-            "the native transport needs macOS; use `configure --transport tunneld` here",
+            "the native transport needs macOS; use `configure --transport userspace` here",
         )
     return [preference]
 
@@ -96,31 +100,40 @@ async def open_device(
 ) -> DeviceSession:
     """Open an RSD session over the first transport that succeeds."""
 
-    table = openers or {Transport.NATIVE: open_native, Transport.TUNNELD: open_tunneld}
+    require_configured_udid(config.udid)
+    table = openers or _default_openers()
     failures: list[SidecarError] = []
     for transport in transport_order(config.transport):
         try:
-            return await table[transport](config)
+            session = await table[transport](config)
         except SidecarError as exc:
             failures.append(SidecarError(exc.exit_code, f"{transport.value}: {exc.detail}"))
+            continue
+        try:
+            require_apple_tv_product(
+                session.rsd.udid or config.udid or "", session.rsd.product_type
+            )
+        except SidecarError:
+            await session.aclose()
+            raise
+        return session
     raise most_specific(failures)
 
 
-async def open_native(config: SidecarConfig) -> DeviceSession:
-    from pymobiledevice3.remote.native_tunnel import NativeRemotedTunnel, browse_native_devices
+def _default_openers() -> dict[Transport, Opener]:
+    from appletv_screenshot.userspace import open_userspace
 
-    udid = config.udid
-    if udid is None:
-        try:
-            devices = await browse_native_devices(timeout=config.discovery_timeout_seconds)
-        except PyMobileDevice3Exception as exc:
-            raise classify_tunnel_error(exc) from exc
-        candidates = [
-            Candidate(udid=str(info["udid"]), name=_optional_str(info.get("name")))
-            for info in devices
-            if isinstance(info.get("udid"), str)
-        ]
-        udid = select_target(candidates, None)
+    return {
+        Transport.NATIVE: open_native,
+        Transport.USERSPACE: open_userspace,
+        Transport.TUNNELD: open_tunneld,
+    }
+
+
+async def open_native(config: SidecarConfig) -> DeviceSession:
+    from pymobiledevice3.remote.native_tunnel import NativeRemotedTunnel
+
+    udid = require_configured_udid(config.udid)
     tunnel = NativeRemotedTunnel(serial=udid)
     try:
         rsd = await tunnel.aopen()
@@ -132,20 +145,12 @@ async def open_native(config: SidecarConfig) -> DeviceSession:
 
 
 async def open_tunneld(config: SidecarConfig) -> DeviceSession:
-    from pymobiledevice3.tunneld.api import get_tunneld_device_by_udid, get_tunneld_devices
+    from pymobiledevice3.tunneld.api import get_tunneld_device_by_udid
 
+    udid = require_configured_udid(config.udid)
     host, port = config.tunneld_address
     try:
-        if config.udid is not None:
-            rsd = await get_tunneld_device_by_udid(config.udid, config.tunneld_address)
-            if rsd is None:
-                raise SidecarError(
-                    ExitCode.DEVICE_NOT_FOUND,
-                    f"tunneld at {host}:{port} has no tunnel for {config.udid}; pair with "
-                    "`pymobiledevice3 remote pair` and check the daemon's device list",
-                )
-            return DeviceSession(rsd=rsd, transport=Transport.TUNNELD, _close=rsd.close)
-        rsds = await get_tunneld_devices(config.tunneld_address)
+        rsd = await get_tunneld_device_by_udid(udid, config.tunneld_address)
     except TunneldConnectionError as exc:
         raise SidecarError(
             ExitCode.TUNNEL_UNAVAILABLE,
@@ -154,18 +159,13 @@ async def open_tunneld(config: SidecarConfig) -> DeviceSession:
         ) from exc
     except PyMobileDevice3Exception as exc:
         raise classify_tunnel_error(exc) from exc
-
-    candidates = [
-        Candidate(udid=rsd.udid, name=rsd.product_type) for rsd in rsds if rsd.udid is not None
-    ]
-    try:
-        udid = select_target(candidates, None)
-    except SidecarError:
-        await _close_all(rsds)
-        raise
-    chosen = next(rsd for rsd in rsds if rsd.udid == udid)
-    await _close_all(rsd for rsd in rsds if rsd is not chosen)
-    return DeviceSession(rsd=chosen, transport=Transport.TUNNELD, _close=chosen.close)
+    if rsd is None:
+        raise SidecarError(
+            ExitCode.DEVICE_NOT_FOUND,
+            f"tunneld at {host}:{port} has no tunnel for {udid}; pair with "
+            "`pymobiledevice3 remote pair` and check the daemon's device list",
+        )
+    return DeviceSession(rsd=rsd, transport=Transport.TUNNELD, _close=rsd.close)
 
 
 def classify_tunnel_error(exc: Exception) -> SidecarError:
@@ -183,12 +183,3 @@ def classify_tunnel_error(exc: Exception) -> SidecarError:
     if isinstance(exc, TunneldConnectionError):
         return SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "tunneld is not reachable")
     return SidecarError(ExitCode.TUNNEL_UNAVAILABLE, f"{type(exc).__name__}: {exc}")
-
-
-async def _close_all(rsds: Iterable[RemoteServiceDiscoveryService]) -> None:
-    for rsd in rsds:
-        await rsd.close()
-
-
-def _optional_str(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None

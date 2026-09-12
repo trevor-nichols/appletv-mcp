@@ -173,6 +173,25 @@ def test_configure_replaces_an_unreadable_file(
     assert saved["udid"] is None
 
 
+def test_identify_prints_configured_target_json(
+    config_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["configure", "--udid", "00008110-AAAA", "--transport", "userspace"]) == 0
+    capsys.readouterr()
+
+    assert main(["identify"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "udid": "00008110-AAAA",
+        "transport": "userspace",
+        "tunneld_host": "127.0.0.1",
+        "tunneld_port": 49151,
+        "discovery_timeout_seconds": 3.0,
+        "timeout_seconds": 15.0,
+    }
+    assert captured.err == ""
+
+
 def test_udid_and_clear_udid_are_mutually_exclusive(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["configure", "--udid", "x", "--clear-udid"])

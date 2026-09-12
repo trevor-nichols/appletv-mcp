@@ -25,6 +25,7 @@ CONFIG_FILENAME = "config.json"
 class Transport(StrEnum):
     AUTO = "auto"
     NATIVE = "native"
+    USERSPACE = "userspace"
     TUNNELD = "tunneld"
 
 
@@ -33,11 +34,11 @@ class SidecarConfig(BaseModel):
 
     udid: str | None = Field(
         default=None,
-        description="UDID of the Apple TV to capture. Required when more than one is reachable.",
+        description="UDID of the Apple TV to capture. Required for capture.",
     )
     transport: Transport = Field(
         default=Transport.AUTO,
-        description="auto tries the macOS native remoted tunnel, then a running tunneld.",
+        description="auto tries native on macOS, then userspace, then tunneld.",
     )
     tunneld_host: str = Field(default="127.0.0.1", min_length=1)
     tunneld_port: int = Field(default=49151, ge=1, le=65535)

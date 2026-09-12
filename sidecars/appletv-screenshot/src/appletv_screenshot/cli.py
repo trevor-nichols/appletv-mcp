@@ -71,13 +71,18 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument(
         "--transport",
         choices=[transport.value for transport in Transport],
-        help="auto tries the macOS native tunnel, then a running tunneld.",
+        help="auto tries native (macOS), then userspace, then a running tunneld.",
     )
     configure.add_argument("--tunneld-host", help="Host of a running tunneld.")
     configure.add_argument("--tunneld-port", type=int, help="Port of a running tunneld.")
     configure.add_argument("--timeout", type=float, help="Seconds allowed for one whole capture.")
     configure.add_argument("--discovery-timeout", type=float, help="Seconds to browse for devices.")
     configure.set_defaults(handler=run_configure)
+    identify = subparsers.add_parser(
+        "identify",
+        help="Print the helper's configured target as JSON. Stores and pairs nothing.",
+    )
+    identify.set_defaults(handler=run_identify)
     return parser
 
 
@@ -115,6 +120,12 @@ def run_configure(args: argparse.Namespace) -> ExitCode:
     path = save_config(config)
     _emit(sys.stdout, f"wrote {path}")
     _emit(sys.stdout, config.model_dump_json(indent=2))
+    return ExitCode.SUCCESS
+
+
+def run_identify(_args: argparse.Namespace) -> ExitCode:
+    config = load_config()
+    _emit(sys.stdout, config.model_dump_json())
     return ExitCode.SUCCESS
 
 

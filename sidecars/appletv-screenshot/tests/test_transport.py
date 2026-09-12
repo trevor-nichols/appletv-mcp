@@ -1,5 +1,4 @@
-from collections.abc import Awaitable, Callable
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import pytest
 from pymobiledevice3.exceptions import (
@@ -33,10 +32,11 @@ TUNNELD_API = "pymobiledevice3.tunneld.api"
 @pytest.mark.parametrize(
     ("preference", "system", "expected"),
     [
-        (Transport.AUTO, "Darwin", [Transport.NATIVE, Transport.TUNNELD]),
-        (Transport.AUTO, "Linux", [Transport.TUNNELD]),
-        (Transport.AUTO, "Windows", [Transport.TUNNELD]),
+        (Transport.AUTO, "Darwin", [Transport.NATIVE, Transport.USERSPACE, Transport.TUNNELD]),
+        (Transport.AUTO, "Linux", [Transport.USERSPACE, Transport.TUNNELD]),
+        (Transport.AUTO, "Windows", [Transport.USERSPACE, Transport.TUNNELD]),
         (Transport.NATIVE, "Darwin", [Transport.NATIVE]),
+        (Transport.USERSPACE, "Linux", [Transport.USERSPACE]),
         (Transport.TUNNELD, "Linux", [Transport.TUNNELD]),
     ],
 )
@@ -48,7 +48,7 @@ def test_native_transport_off_macos_is_unavailable_with_a_fix() -> None:
     with pytest.raises(SidecarError) as excinfo:
         transport_order(Transport.NATIVE, "Linux")
     assert excinfo.value.exit_code is ExitCode.TUNNEL_UNAVAILABLE
-    assert "configure --transport tunneld" in excinfo.value.detail
+    assert "configure --transport userspace" in excinfo.value.detail
 
 
 def test_most_specific_prefers_pairing_over_missing_tunnel() -> None:
@@ -100,26 +100,125 @@ def test_classify_tunnel_error(exc: Exception, expected: ExitCode, fragment: str
     assert fragment in error.detail
 
 
-async def test_open_device_falls_through_to_the_next_transport(
+async def test_open_device_requires_a_configured_udid() -> None:
+    with pytest.raises(SidecarError) as excinfo:
+        await open_device(SidecarConfig())
+    assert excinfo.value.exit_code is ExitCode.AMBIGUOUS_DEVICE
+    assert "configure --udid" in excinfo.value.detail
+
+
+async def test_open_device_falls_from_native_to_userspace_on_macos(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Darwin")
-    session = fake_session(FakeRsd("00008110-AAAA"))
+    session = fake_session(FakeRsd("00008110-AAAA", "AppleTV14,1"), Transport.USERSPACE)
     attempts: list[Transport] = []
 
     async def native(config: SidecarConfig) -> DeviceSession:
         attempts.append(Transport.NATIVE)
         raise SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "remoted missing")
 
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        attempts.append(Transport.USERSPACE)
+        return session
+
+    async def tunneld(config: SidecarConfig) -> DeviceSession:
+        attempts.append(Transport.TUNNELD)
+        raise AssertionError("tunneld must not run after userspace succeeds")
+
+    result = await open_device(
+        SidecarConfig(udid="00008110-AAAA"),
+        {
+            Transport.NATIVE: native,
+            Transport.USERSPACE: userspace,
+            Transport.TUNNELD: tunneld,
+        },
+    )
+    assert result is session
+    assert attempts == [Transport.NATIVE, Transport.USERSPACE]
+
+
+async def test_open_device_on_linux_tries_userspace_before_tunneld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Linux")
+    session = fake_session(FakeRsd("00008110-AAAA", "AppleTV14,1"), Transport.USERSPACE)
+    attempts: list[Transport] = []
+
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        attempts.append(Transport.USERSPACE)
+        return session
+
+    async def tunneld(config: SidecarConfig) -> DeviceSession:
+        attempts.append(Transport.TUNNELD)
+        raise AssertionError("tunneld must not run after userspace succeeds")
+
+    result = await open_device(
+        SidecarConfig(udid="00008110-AAAA"),
+        {Transport.USERSPACE: userspace, Transport.TUNNELD: tunneld},
+    )
+    assert result is session
+    assert attempts == [Transport.USERSPACE]
+
+
+async def test_open_device_falls_through_to_the_next_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Darwin")
+    session = fake_session(FakeRsd("00008110-AAAA", "AppleTV14,1"))
+    attempts: list[Transport] = []
+
+    async def native(config: SidecarConfig) -> DeviceSession:
+        attempts.append(Transport.NATIVE)
+        raise SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "remoted missing")
+
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        attempts.append(Transport.USERSPACE)
+        raise SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "no RemotePairing service")
+
     async def tunneld(config: SidecarConfig) -> DeviceSession:
         attempts.append(Transport.TUNNELD)
         return session
 
     result = await open_device(
-        SidecarConfig(), {Transport.NATIVE: native, Transport.TUNNELD: tunneld}
+        SidecarConfig(udid="00008110-AAAA"),
+        {
+            Transport.NATIVE: native,
+            Transport.USERSPACE: userspace,
+            Transport.TUNNELD: tunneld,
+        },
     )
     assert result is session
-    assert attempts == [Transport.NATIVE, Transport.TUNNELD]
+    assert attempts == [Transport.NATIVE, Transport.USERSPACE, Transport.TUNNELD]
+
+
+async def test_open_device_rejects_an_iphone_after_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Linux")
+    session = fake_session(FakeRsd("00008101-CCCC", "iPhone14,2"), Transport.USERSPACE)
+    closed = False
+
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        return session
+
+    original = session._close
+
+    async def tracking_close() -> None:
+        nonlocal closed
+        closed = True
+        await original()
+
+    session._close = tracking_close
+
+    with pytest.raises(SidecarError) as excinfo:
+        await open_device(
+            SidecarConfig(udid="00008101-CCCC", transport=Transport.USERSPACE),
+            {Transport.USERSPACE: userspace},
+        )
+    assert excinfo.value.exit_code is ExitCode.DEVICE_NOT_FOUND
+    assert "not an Apple TV" in excinfo.value.detail
+    assert closed
 
 
 async def test_open_device_reports_the_most_specific_failure_with_transport_names(
@@ -130,13 +229,25 @@ async def test_open_device_reports_the_most_specific_failure_with_transport_name
     async def native(config: SidecarConfig) -> DeviceSession:
         raise SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "remoted missing")
 
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        raise SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "no RemotePairing service")
+
     async def tunneld(config: SidecarConfig) -> DeviceSession:
         raise SidecarError(ExitCode.PAIRING_REQUIRED, "pairing failed (code 5)")
 
     with pytest.raises(SidecarError) as excinfo:
-        await open_device(SidecarConfig(), {Transport.NATIVE: native, Transport.TUNNELD: tunneld})
+        await open_device(
+            SidecarConfig(udid="00008110-AAAA"),
+            {
+                Transport.NATIVE: native,
+                Transport.USERSPACE: userspace,
+                Transport.TUNNELD: tunneld,
+            },
+        )
     assert excinfo.value.exit_code is ExitCode.PAIRING_REQUIRED
-    assert excinfo.value.detail == "native: remoted missing; tunneld: pairing failed (code 5)"
+    assert "native: remoted missing" in excinfo.value.detail
+    assert "userspace: no RemotePairing service" in excinfo.value.detail
+    assert "tunneld: pairing failed (code 5)" in excinfo.value.detail
 
 
 class _FakeNativeTunnel:
@@ -168,20 +279,9 @@ def native_tunnel(monkeypatch: pytest.MonkeyPatch) -> type[_FakeNativeTunnel]:
     return _FakeNativeTunnel
 
 
-def _browse_returning(
-    devices: list[dict[str, Any]],
-) -> Callable[..., Awaitable[list[dict[str, Any]]]]:
-    async def browse_native_devices(timeout: float = 3.0) -> list[dict[str, Any]]:
-        return devices
-
-    return browse_native_devices
-
-
 async def test_open_native_uses_the_configured_udid_as_serial(
-    monkeypatch: pytest.MonkeyPatch, native_tunnel: type[_FakeNativeTunnel]
+    native_tunnel: type[_FakeNativeTunnel],
 ) -> None:
-    monkeypatch.setattr(f"{NATIVE_TUNNEL}.browse_native_devices", _browse_returning([]))
-
     session = await open_native(SidecarConfig(udid="00008110-AAAA"))
 
     assert session.transport is Transport.NATIVE
@@ -191,33 +291,12 @@ async def test_open_native_uses_the_configured_udid_as_serial(
     assert native_tunnel.instances[0].closed
 
 
-async def test_open_native_browses_when_no_udid_is_configured(
-    monkeypatch: pytest.MonkeyPatch, native_tunnel: type[_FakeNativeTunnel]
+async def test_open_native_without_a_udid_is_ambiguous(
+    native_tunnel: type[_FakeNativeTunnel],
 ) -> None:
-    monkeypatch.setattr(
-        f"{NATIVE_TUNNEL}.browse_native_devices",
-        _browse_returning([{"udid": "00008110-BBBB", "name": "Bedroom"}]),
-    )
-
-    session = await open_native(SidecarConfig())
-
-    assert [tunnel.serial for tunnel in native_tunnel.instances] == ["00008110-BBBB"]
-    await session.aclose()
-
-
-async def test_open_native_refuses_to_guess_between_two_devices(
-    monkeypatch: pytest.MonkeyPatch, native_tunnel: type[_FakeNativeTunnel]
-) -> None:
-    monkeypatch.setattr(
-        f"{NATIVE_TUNNEL}.browse_native_devices",
-        _browse_returning([{"udid": "00008110-AAAA"}, {"udid": "00008110-BBBB", "name": 7}]),
-    )
-
     with pytest.raises(SidecarError) as excinfo:
         await open_native(SidecarConfig())
-
     assert excinfo.value.exit_code is ExitCode.AMBIGUOUS_DEVICE
-    assert "00008110-AAAA, 00008110-BBBB" in excinfo.value.detail
     assert native_tunnel.instances == []
 
 
@@ -283,52 +362,14 @@ async def test_open_tunneld_without_a_tunnel_for_the_udid_is_not_found(
 
 
 async def test_open_tunneld_without_a_daemon_names_the_fix(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def listing(address: tuple[str, int] = ("127.0.0.1", 49151)) -> list[FakeRsd]:
+    async def by_udid(udid: str, address: tuple[str, int] = ("127.0.0.1", 49151)) -> None:
         raise TunneldConnectionError()
 
-    monkeypatch.setattr(f"{TUNNELD_API}.get_tunneld_devices", listing)
+    monkeypatch.setattr(f"{TUNNELD_API}.get_tunneld_device_by_udid", by_udid)
 
     with pytest.raises(SidecarError) as excinfo:
-        await open_tunneld(SidecarConfig())
+        await open_tunneld(SidecarConfig(udid="00008110-AAAA"))
 
     assert excinfo.value.exit_code is ExitCode.TUNNEL_UNAVAILABLE
     assert "127.0.0.1:49151" in excinfo.value.detail
     assert "sudo pymobiledevice3 remote tunneld" in excinfo.value.detail
-
-
-async def test_open_tunneld_with_one_device_closes_nothing_else(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    only = FakeRsd("00008110-AAAA", "AppleTV14,1")
-    nameless = FakeRsd(None)
-
-    async def listing(address: tuple[str, int] = ("127.0.0.1", 49151)) -> list[FakeRsd]:
-        return [nameless, only]
-
-    monkeypatch.setattr(f"{TUNNELD_API}.get_tunneld_devices", listing)
-
-    session = await open_tunneld(SidecarConfig())
-
-    assert session.rsd is only
-    assert nameless.closed
-    assert not only.closed
-
-
-async def test_open_tunneld_with_two_devices_closes_both_and_refuses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first = FakeRsd("00008110-AAAA", "AppleTV14,1")
-    second = FakeRsd("00008110-BBBB", "AppleTV11,1")
-
-    async def listing(address: tuple[str, int] = ("127.0.0.1", 49151)) -> list[FakeRsd]:
-        return [first, second]
-
-    monkeypatch.setattr(f"{TUNNELD_API}.get_tunneld_devices", listing)
-
-    with pytest.raises(SidecarError) as excinfo:
-        await open_tunneld(SidecarConfig())
-
-    assert excinfo.value.exit_code is ExitCode.AMBIGUOUS_DEVICE
-    assert "00008110-AAAA (AppleTV14,1), 00008110-BBBB (AppleTV11,1)" in excinfo.value.detail
-    assert first.closed
-    assert second.closed

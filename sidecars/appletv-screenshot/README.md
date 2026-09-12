@@ -40,18 +40,27 @@ absolute path printed by `uv tool dir --bin` or `which appletv-screenshot`.
 ## Pairing
 
 Screenshots need a RemoteXPC developer pairing. This pairing is separate from the
-`pyatv` (Companion) pairing that Apple TV MCP uses for control. Two transports exist.
-
-### tunneld (macOS, Linux, Windows)
+`pyatv` (Companion) pairing that Apple TV MCP uses for control.
 
 ```bash
 pymobiledevice3 remote pair
-sudo pymobiledevice3 remote tunneld
 ```
 
-Leave the daemon running. It listens on `127.0.0.1:49151` by default; pass
-`--tunneld-host` and `--tunneld-port` to `configure` if you moved it. The helper reuses
-the daemon's tunnel and never needs root itself.
+Four transports exist. Capture always requires a configured UDID.
+
+### userspace (macOS, Linux, Windows)
+
+The normal no-root path for a Wi-Fi Apple TV. The helper browses RemotePairing over
+bonjour, then opens an in-process PyTCP tunnel. No usbmux, no root, and no `tunneld`
+daemon. This is not `UserspaceRsdTunnel`. That class calls `create_using_usbmux` first
+and never reaches RemotePairing when USB is absent.
+
+```bash
+appletv-screenshot configure --udid 00008110-000A1B2C3D4E5F60 --transport userspace
+```
+
+With `--transport auto` (the default) the helper tries native on macOS, then userspace,
+then tunneld. On Linux and Windows it tries userspace, then tunneld.
 
 ### native (macOS only)
 
@@ -59,20 +68,29 @@ The helper rides Apple's own `remoted` tunnel through `remotepairingd`, so no da
 no root are needed. It relies on the Apple developer pairing already held by
 `remotepairingd` for the current user. `pymobiledevice3 remote browse` lists the devices
 that pairing knows. How to establish that pairing for an Apple TV is not covered by the
-pinned pymobiledevice3 corpus in this repository; when the helper exits with code 12 on
-this transport, the Apple TV is not paired with this Mac and the tunneld transport is the
-documented alternative.
+pinned pymobiledevice3 corpus in this repository. If native fails, `auto` falls through
+to userspace.
 
-With `--transport auto` (the default) the helper tries native on macOS first, then tunneld.
-On other systems only tunneld is tried.
+### tunneld (macOS, Linux, Windows)
+
+A last resort when userspace cannot open a tunnel. Leave a privileged daemon running.
+
+```bash
+sudo pymobiledevice3 remote tunneld
+appletv-screenshot configure --transport tunneld --tunneld-port 49151
+```
+
+It listens on `127.0.0.1:49151` by default. Pass `--tunneld-host` and `--tunneld-port` if
+you moved it. The helper reuses the daemon's tunnel and never needs root itself.
 
 ## Configure
 
 ```bash
 appletv-screenshot configure --udid 00008110-000A1B2C3D4E5F60
+appletv-screenshot configure --transport userspace
 appletv-screenshot configure --transport tunneld --tunneld-port 49151
 appletv-screenshot configure --timeout 15 --discovery-timeout 3
-appletv-screenshot configure --clear-udid
+appletv-screenshot identify
 ```
 
 Configuration lives in the `appletv-screenshot` platform config directory
@@ -80,9 +98,13 @@ Configuration lives in the `appletv-screenshot` platform config directory
 target UDID, transport, tunneld address, and timeouts. Pairing records stay where
 `pymobiledevice3` or `remotepairingd` keep them.
 
-Device selection is deterministic. With a configured UDID only that device is accepted.
-Without one, exactly one reachable Apple TV is required; two or more exit with code 11
-and the message lists the visible UDIDs so you can pick one.
+`identify` prints that file as JSON so `appletv-mcp doctor` can report the capture target
+next to the pyatv control identifier. The two identities are not the same value and are
+not compared.
+
+Capture requires `--udid`. The helper never captures the first device of any type. A
+configured UDID that is not an Apple TV exits with code 10. `--clear-udid` forgets the
+target. The next capture then fails until you set a UDID again.
 
 ## Capture
 
@@ -112,9 +134,9 @@ compares this table with its own copy in a test.
 |    0 | `SUCCESS`             | PNG written to `--output`.                                  |
 |    2 | `USAGE`               | Bad arguments (argparse) or invalid `configure` values.      |
 |   10 | `DEVICE_NOT_FOUND`    | Configured device not reachable, or none visible.           |
-|   11 | `AMBIGUOUS_DEVICE`    | Several devices visible and no UDID configured.             |
+|   11 | `AMBIGUOUS_DEVICE`    | Capture has no configured UDID, or several Apple TVs match. |
 |   12 | `PAIRING_REQUIRED`    | The device rejected the pairing or is not paired.           |
-|   13 | `TUNNEL_UNAVAILABLE`  | No usable transport (no tunneld, native unavailable).       |
+|   13 | `TUNNEL_UNAVAILABLE`  | No usable transport (userspace, native, and tunneld failed). |
 |   14 | `CAPTURE_FAILED`      | Device reached, but no PNG came back from DVT.              |
 |   15 | `OUTPUT_WRITE_FAILED` | PNG captured but `--output` could not be written.           |
 |   16 | `CAPTURE_TIMEOUT`     | The capture exceeded `timeout_seconds`.                     |

@@ -19,13 +19,17 @@ from appletv_screenshot.errors import SidecarError
 from appletv_screenshot.exit_codes import ExitCode
 
 
-def test_defaults_target_a_running_tunneld_with_auto_transport() -> None:
+def test_defaults_use_auto_transport_without_a_udid() -> None:
     config = SidecarConfig()
     assert config.udid is None
     assert config.transport is Transport.AUTO
     assert config.tunneld_address == ("127.0.0.1", 49151)
     assert config.discovery_timeout_seconds == 3.0
     assert config.timeout_seconds == 15.0
+
+
+def test_userspace_is_a_valid_transport() -> None:
+    assert SidecarConfig(transport=Transport.USERSPACE).transport is Transport.USERSPACE
 
 
 def test_blank_udid_becomes_none_and_values_are_trimmed() -> None:
