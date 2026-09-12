@@ -239,9 +239,9 @@ async def _helper_target_checks(executable: Path) -> list[CheckResult]:
                 required=False,
             )
         ]
-    udid = payload.get("udid")
-    transport = payload.get("transport", "auto")
-    if not isinstance(udid, str) or not udid:
+    raw_udid = payload.get("udid")
+    raw_transport = payload.get("transport", "auto")
+    if not isinstance(raw_udid, str) or not raw_udid:
         return [
             CheckResult(
                 "Screen capture target",
@@ -250,11 +250,12 @@ async def _helper_target_checks(executable: Path) -> list[CheckResult]:
                 required=False,
             )
         ]
+    transport = raw_transport if isinstance(raw_transport, str) else "auto"
     return [
         CheckResult(
             "Screen capture target",
             OK,
-            f"udid={udid} transport={transport}",
+            f"udid={raw_udid} transport={transport}",
             required=False,
         )
     ]

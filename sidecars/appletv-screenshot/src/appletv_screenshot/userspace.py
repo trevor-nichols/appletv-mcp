@@ -7,7 +7,7 @@ RemotePairing after a USB lockdown session exists, so this module starts at
 dial-plane that `UserspaceRsdTunnel` composes.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from typing import Protocol
 
@@ -32,7 +32,8 @@ from appletv_screenshot.transport import DeviceSession, classify_tunnel_error
 
 
 class RemotePairingProvider(Protocol):
-    remote_identifier: str
+    @property
+    def remote_identifier(self) -> str: ...
 
     @property
     def remote_device_model(self) -> str: ...
@@ -66,7 +67,7 @@ async def open_userspace(config: SidecarConfig) -> DeviceSession:
 
 
 def _pick_apple_tv_service(
-    services: list[RemotePairingProvider], udid: str
+    services: Sequence[RemotePairingProvider], udid: str
 ) -> RemotePairingProvider:
     candidates: list[Candidate] = []
     for service in services:
@@ -83,7 +84,7 @@ def _provider_product_type(service: RemotePairingProvider) -> str | None:
         model = service.remote_device_model
     except AssertionError, AttributeError:
         return None
-    return model if isinstance(model, str) and model else None
+    return model or None
 
 
 async def session_from_provider(provider: RemotePairingProvider) -> DeviceSession:

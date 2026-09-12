@@ -133,9 +133,12 @@ async def test_configure_preserves_screen_capture_and_command_timeout(
         async def close(self) -> None:
             return None
 
+    def fake_storage(path: Path | None = None) -> DummyStorage:
+        return DummyStorage()
+
     monkeypatch.setattr(
         "appletv_mcp.interfaces.cli.commands.configure.PyAtvStorageAdapter",
-        lambda path=None: DummyStorage(),
+        fake_storage,
     )
 
     class DummyRuntime:
