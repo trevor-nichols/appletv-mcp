@@ -6,9 +6,9 @@ tool error. Nothing from `pymobiledevice3` is imported by the MCP package.
 
 ## Why a separate process
 
-- `pymobiledevice3` is licensed GPL-3.0-or-later (see the pinned corpus at
-  `docs/references/pymobiledevice3/index.md`). The MCP package is MIT. The process
-  boundary keeps the two apart.
+- `pymobiledevice3` is confined to this separately distributed helper. The main
+  `appletv-mcp` package does not import or bundle it; the two processes communicate
+  through a narrow command-line/file contract.
 - RemoteXPC tunnels, developer pairing, and DVT sessions have their own failure
   modes. Isolating them means a screenshot failure can never take down Apple TV
   control, which runs over `pyatv` in the MCP process.
@@ -166,3 +166,27 @@ uv run pytest
 
 This project is intentionally not a member of the root `uv` workspace, so
 `uv sync` at the repository root never installs `pymobiledevice3`.
+
+## License
+
+`appletv-screenshot` is licensed under the GNU General Public License,
+version 3 or later (`GPL-3.0-or-later`).
+
+```text
+Apple TV Screenshot
+Copyright (C) 2026 Trevor Nichols
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+```
+
+It depends on `pymobiledevice3`, which is also distributed under
+GPL-3.0-or-later.
+
+This license applies to the screenshot helper under this directory.
+The main `appletv-mcp` package is a separate MIT-licensed project and
+communicates with this helper through a subprocess interface.
+
+See [`LICENSE`](LICENSE) for the full GPLv3 text.

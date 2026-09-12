@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-appletv-mcp:
+    name: Publish appletv-mcp
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-mcp
+      url: https://pypi.org/p/appletv-mcp
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14.7"
+          enable-cache: false
+      - name: Build
+        run: uv build --no-sources
+      - name: Publish
+        run: uv publish
+
+  publish-appletv-screenshot:
+    name: Publish appletv-screenshot
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-screenshot
+      url: https://pypi.org/p/appletv-screenshot
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: sidecars/appletv-screenshot
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14.7"
+          enable-cache: false
+      - name: Build
+        run: uv build --no-sources
+      - name: Publish
+        run: uv publish

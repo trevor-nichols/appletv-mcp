@@ -7,6 +7,8 @@ name = "appletv-screenshot"
 version = "0.2.0"
 description = "Screen-capture helper for Apple TV MCP: one PNG per run over RemoteXPC via pymobiledevice3."
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.14,<3.15"
 authors = [{ name = "Trevor Nichols" }]
 keywords = ["apple-tv", "screenshot", "pymobiledevice3", "mcp"]
@@ -27,7 +29,10 @@ dependencies = [
 appletv-screenshot = "appletv_screenshot.cli:main"
 
 [project.urls]
+Homepage = "https://github.com/trevor-nichols/appletv-mcp"
+Repository = "https://github.com/trevor-nichols/appletv-mcp"
 Documentation = "https://github.com/trevor-nichols/appletv-mcp"
+Changelog = "https://github.com/trevor-nichols/appletv-mcp/releases"
 Issues = "https://github.com/trevor-nichols/appletv-mcp/issues"
 
 [dependency-groups]

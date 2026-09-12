@@ -69,20 +69,28 @@ async def open_userspace(config: SidecarConfig) -> DeviceSession:
 def _pick_apple_tv_service(
     services: Sequence[RemotePairingProvider], udid: str
 ) -> RemotePairingProvider:
-    candidates: list[Candidate] = []
+    usable: list[tuple[Candidate, RemotePairingProvider]] = []
     for service in services:
         identifier = service.remote_identifier
         if not identifier:
             continue
-        candidates.append(Candidate(udid=identifier, product_type=_provider_product_type(service)))
-    selected = select_target(candidates, udid)
-    return next(service for service in services if service.remote_identifier == selected)
+        usable.append(
+            (Candidate(udid=identifier, product_type=_provider_product_type(service)), service)
+        )
+    selected = select_target([candidate for candidate, _service in usable], udid)
+    matching = [(candidate, service) for candidate, service in usable if candidate.udid == selected]
+    for candidate, service in matching:
+        if candidate.product_type:
+            return service
+    return matching[0][1]
 
 
 def _provider_product_type(service: RemotePairingProvider) -> str | None:
     try:
         model = service.remote_device_model
-    except AssertionError, AttributeError:
+    except AssertionError, AttributeError, KeyError, TypeError:
+        # pymobiledevice3 11.12.4 reads handshake_info["peerDeviceInfo"]["model"].
+        # Some RemotePairing handshakes omit that key; skip them instead of crashing.
         return None
     return model or None
 
