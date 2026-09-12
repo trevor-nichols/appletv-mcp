@@ -30,7 +30,10 @@ dependencies = [
 appletv-mcp = "appletv_mcp.interfaces.cli.main:main"
 
 [project.urls]
+Homepage = "https://github.com/trevor-nichols/appletv-mcp"
+Repository = "https://github.com/trevor-nichols/appletv-mcp"
 Documentation = "https://github.com/trevor-nichols/appletv-mcp"
+Changelog = "https://github.com/trevor-nichols/appletv-mcp/releases"
 Issues = "https://github.com/trevor-nichols/appletv-mcp/issues"
 
 [dependency-groups]
