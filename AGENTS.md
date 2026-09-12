@@ -62,6 +62,8 @@ Also inspect the pinned reference corpus under:
 docs/references/
 ```
 
+That corpus is local-only (gitignored, not on GitHub). Keep a copy on development machines. Do not commit it. If the directory is absent, use the installed packages and public upstream docs instead.
+
 The reference corpus should include material for:
 
 ```text

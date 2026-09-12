@@ -133,4 +133,5 @@ packages = ["src/appletv_mcp"]
 
 [tool.hatch.build.targets.sdist]
 # The screenshot helper is a separate project with its own lockfile and license footprint.
-exclude = ["sidecars"]
+# Upstream reference docs are local-only and are not redistributed.
+exclude = ["sidecars", "docs/references"]
