@@ -23,3 +23,41 @@ jobs:
         run: uv run pyright
       - name: Pytest
         run: uv run pytest
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Wheel excludes the sidecar and pymobiledevice3
+        run: |
+          uv run python - <<'EOF'
+          import glob, sys, zipfile
+          [wheel] = glob.glob("dist/appletv_mcp-*.whl")
+          names = zipfile.ZipFile(wheel).namelist()
+          leaked = [n for n in names if "sidecar" in n or "appletv_screenshot" in n]
+          metadata = next(n for n in names if n.endswith("METADATA"))
+          requires = zipfile.ZipFile(wheel).read(metadata).decode()
+          assert not leaked, leaked
+          assert "pymobiledevice3" not in requires, "pymobiledevice3 leaked into wheel metadata"
+          print(f"{wheel}: {len(names)} files, no sidecar, no pymobiledevice3")
+          EOF
+
+  sidecar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecars/appletv-screenshot
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14.7"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Pyright
+        run: uv run pyright
+      - name: Pytest
+        run: uv run pytest
+      - name: Helper answers --version
+        run: uv run appletv-screenshot --version
