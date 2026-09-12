@@ -37,6 +37,45 @@ async def test_open_userspace_requires_a_configured_udid() -> None:
     assert "configure --udid" in excinfo.value.detail
 
 
+class _HandshakeWithoutPeerInfo:
+    remote_identifier = "CB40EBF2-C9E6-4A12-B5FC-8519228BEC85"
+    closed = False
+
+    @property
+    def remote_device_model(self) -> str:
+        raise KeyError("peerDeviceInfo")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def test_open_userspace_skips_handshake_without_peer_device_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    udid = "CB40EBF2-C9E6-4A12-B5FC-8519228BEC85"
+    broken = _HandshakeWithoutPeerInfo()
+    tv = _FakePairing(udid, "AppleTV5,3")
+    session = fake_session(FakeRsd(udid, "AppleTV5,3"), Transport.USERSPACE)
+    connected: list[str] = []
+
+    async def browse(*, bonjour_timeout: float = 3.0, udid: str | None = None) -> list[object]:
+        return [broken, tv]
+
+    async def connect(provider: _FakePairing) -> object:
+        connected.append(provider.remote_identifier)
+        return session
+
+    monkeypatch.setattr(f"{REMOTE_PAIRING}.get_remote_pairing_tunnel_services", browse)
+    monkeypatch.setattr("appletv_screenshot.userspace.session_from_provider", connect)
+
+    result = await open_userspace(SidecarConfig(udid=udid))
+
+    assert result is session
+    assert connected == [udid]
+    assert broken.closed
+    assert not tv.closed
+
+
 async def test_open_userspace_uses_the_matching_apple_tv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
