@@ -5,6 +5,7 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from pyatv.interface import Storage
 
 from appletv_mcp.application.ports.apple_tv import DiscoveredDevice
@@ -19,6 +20,7 @@ from appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
 from appletv_mcp.interfaces.cli.commands.configure import (
     ConfigureError,
     _apple_tv_candidates,
+    _settings_for_chosen_device,
     run_configure,
 )
 from appletv_mcp.interfaces.cli.commands.doctor import run_doctor
@@ -171,6 +173,32 @@ async def test_configure_preserves_screen_capture_and_command_timeout(
     assert saved.screen_capture.command == "/opt/appletv-screenshot"
     assert saved.screen_capture.timeout_seconds == 41.0
     assert saved.screen_capture.max_image_bytes == 1024
+
+
+def test_settings_for_chosen_device_keeps_screen_capture_and_rejects_invalid_host(
+    tmp_path: Path,
+) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    repo.save(
+        make_settings(
+            command_timeout_seconds=22.5,
+            screen_capture=ScreenCaptureSettings(
+                command="/opt/appletv-screenshot",
+                timeout_seconds=41.0,
+                max_image_bytes=1024,
+            ),
+        )
+    )
+    chosen = discovered(name="Bedroom", identifier="DE:AD:BE:EF:00:01", address="10.0.0.8")
+    settings = _settings_for_chosen_device(repo, chosen, 7.0)
+    assert settings.device_identifier == chosen.identifier
+    assert settings.preferred_host == "10.0.0.8"
+    assert settings.scan_timeout_seconds == 7.0
+    assert settings.command_timeout_seconds == 22.5
+    assert settings.screen_capture.command == "/opt/appletv-screenshot"
+    assert settings.screen_capture.timeout_seconds == 41.0
+    with pytest.raises(ValidationError, match="IPv4"):
+        _settings_for_chosen_device(repo, discovered(address="living-room.local"), 5.0)
 
 
 def test_configure_candidates_ignore_known_non_tv_devices() -> None:

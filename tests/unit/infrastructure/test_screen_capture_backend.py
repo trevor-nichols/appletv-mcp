@@ -22,6 +22,7 @@ from appletv_mcp.infrastructure.screen_capture import (
     HelperExitCode,
     error_for_exit_status,
     resolve_screen_capture_executable,
+    run_helper_command,
 )
 from appletv_mcp.infrastructure.screen_capture.contract import (
     HELPER_MISSING_MESSAGE,
@@ -141,7 +142,7 @@ def test_resolve_executable_by_path_requires_executable_file(tmp_path: Path) -> 
     [
         (HelperExitCode.USAGE, ScreenCaptureFailedError, "helper contract"),
         (HelperExitCode.DEVICE_NOT_FOUND, ScreenCaptureFailedError, "could not find"),
-        (HelperExitCode.AMBIGUOUS_DEVICE, ScreenCaptureFailedError, "more than one Apple TV"),
+        (HelperExitCode.AMBIGUOUS_DEVICE, ScreenCaptureFailedError, "unambiguous Apple TV target"),
         (HelperExitCode.PAIRING_REQUIRED, ScreenCapturePairingRequiredError, "pairing"),
         (HelperExitCode.TUNNEL_UNAVAILABLE, ScreenCaptureFailedError, "RemoteXPC tunnel"),
         (HelperExitCode.CAPTURE_FAILED, ScreenCaptureFailedError, "did not return a screenshot"),
@@ -218,6 +219,16 @@ async def test_timeout_kills_helper_that_ignores_sigterm(tmp_path: Path) -> None
 
     _assert_process_gone(helper.pid())
     assert list(temp_root.iterdir()) == []
+
+
+async def test_run_helper_command_cancellation_stops_child(tmp_path: Path) -> None:
+    helper = install_fake_helper(tmp_path, "hang")
+    task = asyncio.create_task(run_helper_command(helper.executable, ["probe-hang"]))
+    pid = await _wait_for_pid(helper)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    _assert_process_gone(pid)
 
 
 async def test_cancellation_stops_helper_and_cleans_up(tmp_path: Path) -> None:

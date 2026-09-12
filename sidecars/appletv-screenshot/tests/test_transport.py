@@ -221,7 +221,57 @@ async def test_open_device_rejects_an_iphone_after_connect(
     assert closed
 
 
-async def test_open_device_reports_the_most_specific_failure_with_transport_names(
+async def test_open_device_auto_reports_userspace_not_native_pairing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Darwin")
+
+    async def native(config: SidecarConfig) -> DeviceSession:
+        raise SidecarError(ExitCode.PAIRING_REQUIRED, "pairing failed (code 5)")
+
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        raise SidecarError(ExitCode.DEVICE_NOT_FOUND, "configured device is not reachable")
+
+    async def tunneld(config: SidecarConfig) -> DeviceSession:
+        raise SidecarError(ExitCode.TUNNEL_UNAVAILABLE, "no tunneld reachable")
+
+    with pytest.raises(SidecarError) as excinfo:
+        await open_device(
+            SidecarConfig(udid="00008110-AAAA"),
+            {
+                Transport.NATIVE: native,
+                Transport.USERSPACE: userspace,
+                Transport.TUNNELD: tunneld,
+            },
+        )
+    assert excinfo.value.exit_code is ExitCode.DEVICE_NOT_FOUND
+    assert "native: pairing failed (code 5)" in excinfo.value.detail
+    assert "userspace: configured device is not reachable" in excinfo.value.detail
+    assert "tunneld: no tunneld reachable" in excinfo.value.detail
+
+
+async def test_open_device_auto_still_reports_userspace_pairing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Linux")
+
+    async def userspace(config: SidecarConfig) -> DeviceSession:
+        raise SidecarError(ExitCode.PAIRING_REQUIRED, "device is not paired")
+
+    async def tunneld(config: SidecarConfig) -> DeviceSession:
+        raise SidecarError(ExitCode.DEVICE_NOT_FOUND, "no tunnel for udid")
+
+    with pytest.raises(SidecarError) as excinfo:
+        await open_device(
+            SidecarConfig(udid="00008110-AAAA"),
+            {Transport.USERSPACE: userspace, Transport.TUNNELD: tunneld},
+        )
+    assert excinfo.value.exit_code is ExitCode.PAIRING_REQUIRED
+    assert "userspace: device is not paired" in excinfo.value.detail
+    assert "tunneld: no tunnel for udid" in excinfo.value.detail
+
+
+async def test_open_device_auto_keeps_all_transport_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("appletv_screenshot.transport.platform.system", lambda: "Darwin")
@@ -244,7 +294,7 @@ async def test_open_device_reports_the_most_specific_failure_with_transport_name
                 Transport.TUNNELD: tunneld,
             },
         )
-    assert excinfo.value.exit_code is ExitCode.PAIRING_REQUIRED
+    assert excinfo.value.exit_code is ExitCode.TUNNEL_UNAVAILABLE
     assert "native: remoted missing" in excinfo.value.detail
     assert "userspace: no RemotePairing service" in excinfo.value.detail
     assert "tunneld: pairing failed (code 5)" in excinfo.value.detail
