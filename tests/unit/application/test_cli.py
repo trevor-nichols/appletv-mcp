@@ -298,7 +298,7 @@ def test_cli_help_and_unknown(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["--version"])
     assert exc_info.value.code == 0
-    assert capsys.readouterr().out.strip() == "appletv-mcp 0.1.0"
+    assert capsys.readouterr().out.strip() == "appletv-mcp 0.2.0"
 
     with pytest.raises(SystemExit) as exc_info:
         main(["nope"])

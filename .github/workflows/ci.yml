@@ -23,12 +23,12 @@ jobs:
         run: uv run pyright
       - name: Pytest
         run: uv run pytest
-      - name: Build wheel
-        run: uv build --wheel
-      - name: Wheel excludes the sidecar and pymobiledevice3
+      - name: Build
+        run: uv build
+      - name: Artifacts exclude the sidecar and pymobiledevice3
         run: |
           uv run python - <<'EOF'
-          import glob, sys, zipfile
+          import glob, tarfile, zipfile
           [wheel] = glob.glob("dist/appletv_mcp-*.whl")
           names = zipfile.ZipFile(wheel).namelist()
           leaked = [n for n in names if "sidecar" in n or "appletv_screenshot" in n]
@@ -36,7 +36,10 @@ jobs:
           requires = zipfile.ZipFile(wheel).read(metadata).decode()
           assert not leaked, leaked
           assert "pymobiledevice3" not in requires, "pymobiledevice3 leaked into wheel metadata"
-          print(f"{wheel}: {len(names)} files, no sidecar, no pymobiledevice3")
+          [sdist] = glob.glob("dist/appletv_mcp-*.tar.gz")
+          sdist_leaked = [n for n in tarfile.open(sdist).getnames() if "/sidecars/" in n]
+          assert not sdist_leaked, sdist_leaked
+          print(f"{wheel}: {len(names)} files; {sdist}: no sidecar, no pymobiledevice3")
           EOF
 
   sidecar:
