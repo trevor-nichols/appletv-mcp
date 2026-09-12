@@ -39,10 +39,12 @@ jobs:
           # Hatch copies README.md into METADATA. The description names the helper
           # on purpose. The dependency line is the leak to forbid.
           assert all("pymobiledevice3" not in line for line in requires_dist), requires_dist
+          assert "License-Expression: MIT" in text, text
+          assert "License-File: LICENSE" in text, text
           [sdist] = glob.glob("dist/appletv_mcp-*.tar.gz")
           sdist_leaked = [n for n in tarfile.open(sdist).getnames() if "/sidecars/" in n]
           assert not sdist_leaked, sdist_leaked
-          print(f"{wheel}: {len(names)} files; {sdist}: no sidecar, no pymobiledevice3 requirement")
+          print(f"{wheel}: {len(names)} files; {sdist}: MIT, no sidecar, no pymobiledevice3 requirement")
           EOF
 
   sidecar:
@@ -67,3 +69,18 @@ jobs:
         run: uv run pytest
       - name: Helper answers --version
         run: uv run appletv-screenshot --version
+      - name: Build
+        run: uv build
+      - name: Wheel is GPL-3.0-or-later
+        run: |
+          uv run python - <<'EOF'
+          import glob, zipfile
+          [wheel] = glob.glob("dist/appletv_screenshot-*.whl")
+          names = zipfile.ZipFile(wheel).namelist()
+          metadata = next(n for n in names if n.endswith("METADATA"))
+          text = zipfile.ZipFile(wheel).read(metadata).decode()
+          assert "License-Expression: GPL-3.0-or-later" in text, text
+          license_files = [n for n in names if n.endswith("/licenses/LICENSE") or n.endswith(".dist-info/LICENSE")]
+          assert license_files, names
+          print(f"{wheel}: GPL-3.0-or-later; license file {license_files[0]}")
+          EOF

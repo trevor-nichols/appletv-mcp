@@ -435,6 +435,8 @@ The normal Wi-Fi userspace path does not require root or a permanently running t
 
 The helper exists as a separate process so its protocol stack, dependencies, pairing records, and failure modes remain isolated from Apple TV control.
 
+`pymobiledevice3` is confined to the separately distributed `appletv-screenshot` helper. The main `appletv-mcp` package does not import or bundle it; the two processes communicate through a narrow command-line/file contract.
+
 ---
 
 ## Designed for agents
@@ -788,11 +790,25 @@ Avoid exposing raw Apple protocol details through the MCP contract unless there 
 
 ## License
 
-The main `appletv-mcp` package is licensed under the MIT License.
+This repository contains two separately distributed components.
 
-The optional `appletv-screenshot` helper is distributed separately and depends on `pymobiledevice3`, which is licensed under GPL-3.0-or-later.
+### Apple TV MCP
 
-See the relevant license files and package metadata for details.
+`appletv-mcp` is licensed under the MIT License.
+
+It does not import, bundle, or distribute `pymobiledevice3`.
+
+### Apple TV Screenshot
+
+The optional `appletv-screenshot` helper under
+`sidecars/appletv-screenshot/` is licensed under GPL-3.0-or-later.
+
+The helper directly uses `pymobiledevice3`, which is also licensed
+under GPL-3.0-or-later.
+
+The two components communicate through a one-shot subprocess interface.
+
+See [`LICENSING.md`](LICENSING.md) for the repository-wide map.
 
 ---
 
