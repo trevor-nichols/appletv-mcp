@@ -33,13 +33,16 @@ jobs:
           names = zipfile.ZipFile(wheel).namelist()
           leaked = [n for n in names if "sidecar" in n or "appletv_screenshot" in n]
           metadata = next(n for n in names if n.endswith("METADATA"))
-          requires = zipfile.ZipFile(wheel).read(metadata).decode()
+          text = zipfile.ZipFile(wheel).read(metadata).decode()
+          requires_dist = [line for line in text.splitlines() if line.startswith("Requires-Dist:")]
           assert not leaked, leaked
-          assert "pymobiledevice3" not in requires, "pymobiledevice3 leaked into wheel metadata"
+          # Hatch copies README.md into METADATA. The description names the helper
+          # on purpose. The dependency line is the leak to forbid.
+          assert all("pymobiledevice3" not in line for line in requires_dist), requires_dist
           [sdist] = glob.glob("dist/appletv_mcp-*.tar.gz")
           sdist_leaked = [n for n in tarfile.open(sdist).getnames() if "/sidecars/" in n]
           assert not sdist_leaked, sdist_leaked
-          print(f"{wheel}: {len(names)} files; {sdist}: no sidecar, no pymobiledevice3")
+          print(f"{wheel}: {len(names)} files; {sdist}: no sidecar, no pymobiledevice3 requirement")
           EOF
 
   sidecar:
