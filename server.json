@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.trevor-nichols/appletv-mcp",
+  "title": "Apple TV MCP",
+  "description": "Local MCP server for semantic Apple TV control with optional screenshots.",
+  "version": "0.2.0",
+  "websiteUrl": "https://github.com/trevor-nichols/appletv-mcp",
+  "repository": {
+    "url": "https://github.com/trevor-nichols/appletv-mcp",
+    "source": "github",
+    "id": "1365065079"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "appletv-mcp",
+      "version": "0.2.0",
+      "runtimeHint": "uvx",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "serve"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
