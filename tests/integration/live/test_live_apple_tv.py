@@ -5,30 +5,14 @@ APPLE_TV_LIVE_WRITES=1 so ordinary integration opt-in stays non-disruptive.
 """
 
 import os
-from collections.abc import AsyncIterator
 
 import pytest
 
-from appletv_mcp.composition import Runtime, create_runtime
+from appletv_mcp.composition import Runtime
 from appletv_mcp.domain.enums import ConnectionState, FeatureAvailability
-from appletv_mcp.domain.errors import DeviceNotConfiguredError
 from appletv_mcp.domain.models.status import AppleTVStatus
-from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 
 pytestmark = pytest.mark.live
-
-
-@pytest.fixture
-async def runtime() -> AsyncIterator[Runtime]:
-    try:
-        FileSettingsRepository().load()
-    except DeviceNotConfiguredError as exc:
-        pytest.skip(str(exc))
-    created = await create_runtime()
-    try:
-        yield created
-    finally:
-        await created.aclose()
 
 
 async def _require_connected(runtime: Runtime) -> AppleTVStatus:
