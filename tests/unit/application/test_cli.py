@@ -12,6 +12,7 @@ from appletv_mcp.application.services.apple_tv_controller import AppleTVControll
 from appletv_mcp.application.services.screen_capture import ScreenCaptureService
 from appletv_mcp.composition import Runtime
 from appletv_mcp.domain.errors import DeviceUnreachableError, StorageError
+from appletv_mcp.domain.models.settings import ScreenCaptureSettings
 from appletv_mcp.infrastructure.config.repository import FileSettingsRepository
 from appletv_mcp.infrastructure.pyatv.connection_manager import ConnectionManager
 from appletv_mcp.infrastructure.pyatv.storage import PyAtvStorageAdapter
@@ -92,6 +93,81 @@ async def test_configure_saves_selected_device(
     assert saved.device_identifier == device.identifier
     assert saved.preferred_host == device.address
     assert "Capability summary" in stdout.getvalue()
+
+
+async def test_configure_preserves_screen_capture_and_command_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = FileSettingsRepository(tmp_path / "config.json")
+    repo.save(
+        make_settings(
+            command_timeout_seconds=22.5,
+            screen_capture=ScreenCaptureSettings(
+                command="/opt/appletv-screenshot",
+                timeout_seconds=41.0,
+                max_image_bytes=1024,
+            ),
+        )
+    )
+    device = discovered(name="Bedroom", identifier="DE:AD:BE:EF:00:01", address="10.0.0.8")
+    stdout = StringIO()
+
+    async def fake_scan(
+        self: object,
+        *,
+        timeout: float,
+        identifier: str | None = None,
+        hosts: Sequence[str] | None = None,
+    ) -> list[DiscoveredDevice]:
+        return [device]
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvScanner.scan",
+        fake_scan,
+    )
+
+    class DummyStorage:
+        async def load(self) -> object:
+            return object()
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.PyAtvStorageAdapter",
+        lambda path=None: DummyStorage(),
+    )
+
+    class DummyRuntime:
+        def __init__(self) -> None:
+            self.controller = AppleTVController(FakeGateway())
+
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_create_runtime(**_kwargs: object) -> DummyRuntime:
+        return DummyRuntime()
+
+    monkeypatch.setattr(
+        "appletv_mcp.interfaces.cli.commands.configure.create_runtime",
+        fake_create_runtime,
+    )
+
+    code = await run_configure(
+        stdin=StringIO(),
+        stdout=stdout,
+        settings_repository=repo,
+        selector=lambda devices: devices[0],
+    )
+    assert code == 0
+    saved = repo.load()
+    assert saved.device_identifier == device.identifier
+    assert saved.device_name == "Bedroom"
+    assert saved.preferred_host == "10.0.0.8"
+    assert saved.command_timeout_seconds == 22.5
+    assert saved.screen_capture.command == "/opt/appletv-screenshot"
+    assert saved.screen_capture.timeout_seconds == 41.0
+    assert saved.screen_capture.max_image_bytes == 1024
 
 
 def test_configure_candidates_ignore_known_non_tv_devices() -> None:

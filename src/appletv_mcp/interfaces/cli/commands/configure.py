@@ -55,12 +55,7 @@ async def run_configure(
                 render_device_row(index, device.name, device.identifier, device.address) + "\n"
             )
         chosen = (selector or _prompt_selector(stdin, stdout))(candidates)
-        settings = Settings(
-            device_identifier=chosen.identifier,
-            device_name=chosen.name,
-            preferred_host=chosen.address,
-            scan_timeout_seconds=timeout,
-        )
+        settings = _settings_for_chosen_device(repository, chosen, timeout)
         repository.save(settings)
         stdout.write(
             f"Saved identifier={settings.device_identifier} host={settings.preferred_host}\n"
@@ -139,3 +134,25 @@ async def _verify(controller: AppleTVController, stdout: TextIO) -> None:
         raise ConfigureError(str(exc)) from exc
     except AppleTVError as exc:
         raise ConfigureError(f"Configuration saved but verification failed: {exc.message}") from exc
+
+
+def _settings_for_chosen_device(
+    repository: FileSettingsRepository,
+    chosen: DiscoveredDevice,
+    timeout: float,
+) -> Settings:
+    """Rewrite device identity and keep unrelated fields from an existing profile."""
+
+    device = {
+        "device_identifier": chosen.identifier,
+        "device_name": chosen.name,
+        "preferred_host": chosen.address,
+        "scan_timeout_seconds": timeout,
+    }
+    if not repository.exists():
+        return Settings.model_validate(device)
+    try:
+        previous = repository.load()
+    except AppleTVError:
+        return Settings.model_validate(device)
+    return previous.model_copy(update=device)
