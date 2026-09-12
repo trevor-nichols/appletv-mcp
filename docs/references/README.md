@@ -43,10 +43,14 @@ references/
     └── _hooks/
 ```
 
-For screen capture, the pages that matter are `guides/ios17-tunnels.md` (pairing and `tunneld`
-for Apple TV), `guides/network-stacks.md` (native `remoted` tunnel on macOS), `api/connection.md`
-(`get_tunneld_devices`), `api/dvt.md` (`Screenshot`), and `guides/troubleshooting.md`
-(`InvalidServiceError`, Developer Mode, DDI).
+For screen capture, the pages that matter are `guides/ios17-tunnels.md` (pairing, the no-root
+userspace default, and when `tunneld` is still required), `guides/network-stacks.md` (native
+`remoted` on macOS and userspace PyTCP), `guides/python-api.md` (`PreferredRsdTunnel` versus
+`UserspaceRsdTunnel`; the sidecar does not wrap those classes, see
+`ADR-0001-screen-capture.md`), `api/connection.md`, `api/dvt.md` (`Screenshot`), and
+`guides/troubleshooting.md` (`InvalidServiceError`, Developer Mode, DDI).
+The working Wi-Fi Apple TV path is RemotePairing browse
+(`get_remote_pairing_tunnel_services`) plus the userspace TUN and dial-plane.
 
 ## Agent guidance
 

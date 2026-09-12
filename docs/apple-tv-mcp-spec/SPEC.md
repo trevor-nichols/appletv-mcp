@@ -299,6 +299,7 @@ appletv-mcp/
 │   ├── apple-tv-mcp-spec/
 │   │   ├── SPEC.md
 │   │   ├── SPEC_v0.2.md
+│   │   ├── ADR-0001-screen-capture.md
 │   │   └── IMPLEMENTATION_CHECKLIST.md
 │   └── references/
 │       └── ...

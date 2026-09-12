@@ -8,19 +8,19 @@ Implemented and tested with fakes (no hardware):
 
 - [x] Domain: `CapturedScreen` (frozen, `image/png` only, non-empty bytes), `ScreenCaptureSettings` nested under `Settings.screen_capture` with defaults so v0.1 config files load unchanged, and the `ScreenCapture*` error family under a `ScreenCaptureError` base.
 - [x] Application: `ScreenCaptureBackend` port and `ScreenCaptureService` with its own `asyncio.Lock` (five concurrent captures observed to run one at a time).
-- [x] Infrastructure: `ExternalScreenCaptureBackend` spawns the helper with `create_subprocess_exec`, fixed argv, all streams `DEVNULL`, per-call temp dir removed in `finally`, timeout and cancel handled with terminate/wait/kill, PNG checked by signature, IHDR, and dimensions, size capped by `max_image_bytes`. `HelperExitCode` table and message mapping in `contract.py`.
+- [x] Infrastructure: `ExternalScreenCaptureBackend` spawns the helper with `create_subprocess_exec`, fixed argv, all streams `DEVNULL`, per-call temp dir removed in `finally`, timeout and cancel handled with terminate/wait/kill, PNG checked by signature, IHDR first, at least one IDAT, complete IEND, and dimensions, size capped by `max_image_bytes`. `HelperExitCode` table and message mapping in `contract.py`. Doctor parses helper `--version` for `contract=N`.
 - [x] MCP: `apple_tv_screenshot`, no arguments, `structured_output=False`, returns one `ImageContent` via the SDK `Image` helper. Fourteen tools in the contract test; the output-schema assertion is relaxed only for this tool by name. Server instructions and the status/remote tool descriptions rewritten for point-in-time perception.
-- [x] Doctor: `SKIP` when the helper is missing, `OK` with dimensions after one real capture, `FAIL` with the helper error; never affects the exit code.
-- [x] Sidecar `sidecars/appletv-screenshot/` (separate `uv` project, own lockfile, not a workspace member): `capture --output PATH`, `configure`, `--version`; transports `auto` (native on macOS, then tunneld), `native`, `tunneld`; deterministic target selection (configured UDID or exactly one visible device); exit codes 0/2/10–17; 82 tests.
+- [x] Doctor: `SKIP` when the helper is missing; optional `FAIL` on helper contract mismatch or missing capture UDID (skips capture); `OK` with dimensions after one real capture; never affects the exit code. Reports helper UDID and transport from `identify` next to the pyatv identifier.
+- [x] Sidecar `sidecars/appletv-screenshot/` (separate `uv` project, own lockfile, not a workspace member): `capture --output PATH`, `configure`, `identify`, `--version`; transports `auto` (native on macOS, then userspace, then tunneld; userspace then tunneld elsewhere), `native`, `userspace`, `tunneld`; capture requires a configured Apple TV UDID and rejects other product types; exit codes 0/2/10-17.
 - [x] Root drift test loads the helper's `exit_codes.py` by path and compares it with `HelperExitCode`.
 - [x] CI: separate sidecar job; root job builds the wheel and fails if it carries the sidecar or a `pymobiledevice3` requirement.
 - [x] Live test `tests/integration/live/test_live_screen_capture.py` (read-only, `APPLE_TV_INTEGRATION_TESTS=1`, skips without the helper).
-- [x] Docs: `AGENTS.md` §8/§9/§10/§10a/§22/§35/§37/§38, `README.md`, `SPEC.md` (§4, §5 real tree, §13, §14.14, §15, §17, §19.2, §20.5, §22–§24), `docs/references/README.md` and `MANIFEST.sha256`.
+- [x] Docs: `AGENTS.md` §1/§2/§8/§9/§10/§10a/§22/§35/§37/§38, `README.md`, `SPEC.md` (§4, §5 real tree, §13, §14.14, §15, §17, §19.2, §20.5, §22-§24), `SPEC_v0.2.md` §16, `ADR-0001-screen-capture.md`, `docs/references/README.md` and `MANIFEST.sha256`.
 - [x] Version `0.2.0` in `pyproject.toml`, `_version.py`, `uv.lock`, and the sidecar.
 
 Not executed (hardware-dependent). Do not tick without a real Apple TV:
 
-- [ ] `pymobiledevice3 remote pair` and `remote tunneld` (or the macOS native tunnel) against a tvOS 17+ Apple TV with Developer Mode and the DDI.
+- [ ] `pymobiledevice3 remote pair` and a userspace (or native, or tunneld) capture against a tvOS 17+ Apple TV with Developer Mode and the DDI.
 - [ ] `appletv-screenshot capture --output ...` returns a real PNG; record the tvOS version, host OS, and that pymobiledevice3 11.12.4 worked.
 - [ ] `apple_tv_screenshot` through an MCP host renders the image.
 - [ ] screenshot → `apple_tv_press` → screenshot shows the change.
@@ -32,9 +32,12 @@ v0.2 deviations from `SPEC_v0.2.md`, all deliberate:
 - `ScreenCaptureError` base class added above the five specified errors so the MCP boundary and the exit-code map can name the family.
 - Exit code `17 CONFIG_INVALID` added to the helper contract; `appletv-screenshot configure` repairs an unreadable config from defaults.
 - Helper stderr is detached (`DEVNULL`) rather than captured: it may carry tracebacks with pairing paths, and exit codes are the API.
-- The helper offers no `devices` subcommand; the `AMBIGUOUS_DEVICE` message lists visible UDIDs and `pymobiledevice3 remote browse` exists.
+- The helper offers no `devices` subcommand. `identify` prints the configured target. Selection errors still list visible UDIDs.
 - Native-tunnel pairing failure is detected by the `pairing failed` message prefix of `UserspaceTunnelUnavailableError`, because pymobiledevice3 11.12.4 raises a private subclass on that path.
 - `pymobiledevice3==11.12.4` is the latest stable at the time of writing. No proof-of-concept pin was available to recover, so the pin is unverified on hardware.
+- Capture requires a configured helper UDID even when one Apple TV is visible. `PreferredRsdTunnel` / `UserspaceRsdTunnel` are not used. Those classes call `create_using_usbmux` first, so a Wi-Fi Apple TV never reaches RemotePairing. The userspace transport browses RemotePairing and then uses the same TUN and dial-plane.
+- `appletv-mcp configure` preserves unrelated `Settings` fields (`screen_capture`, `command_timeout_seconds`) when rewriting device identity.
+- Durable v0.2 architecture lives in `ADR-0001-screen-capture.md`. The ephemeral session TSV is not in the repo.
 
 ## Current project state
 

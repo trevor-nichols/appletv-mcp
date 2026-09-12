@@ -764,6 +764,10 @@ Before returning a screenshot:
 b"\x89PNG\r\n\x1a\n"
 ```
 
+- Require the first chunk to be IHDR with positive width and height.
+- Require at least one IDAT chunk.
+- Require a complete IEND chunk. Reject a buffer that ends inside a chunk.
+- Do not verify CRCs or decode pixels.
 - Reject malformed/non-PNG output.
 - Do not re-encode or resize the image in v0.2.
 

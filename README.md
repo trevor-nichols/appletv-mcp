@@ -86,7 +86,7 @@ This scans the network, lets you select one Apple TV, and writes a device profil
 uv run appletv-mcp doctor
 ```
 
-Non-destructive checks, one per line, screen-reader friendly. Exits non-zero when a required prerequisite fails (configuration, storage, discovery, identity, or connection). The last line reports screen capture: `SKIP` when the helper is not installed, `OK` with the PNG dimensions after one real capture, or `FAIL` with the helper's error. That line never changes the exit code.
+Non-destructive checks, one per line, screen-reader friendly. Exits non-zero when a required prerequisite fails (configuration, storage, discovery, identity, or connection). Screen-capture lines never change the exit code. A missing helper is `SKIP`. A helper contract mismatch or missing capture UDID is optional `FAIL` and skips the capture. A successful capture is `OK` with PNG dimensions.
 
 ## Screen capture
 
@@ -98,18 +98,19 @@ Short version:
 # 1. Install the helper next to the server (any Python tool installer works)
 uv tool install ./sidecars/appletv-screenshot
 
-# 2. Pair the Apple TV for developer access and keep a tunnel daemon running
+# 2. Pair the Apple TV for developer access (this is separate from atvremote)
 pymobiledevice3 remote pair
-sudo pymobiledevice3 remote tunneld
 
-# 3. Pin the helper to one device
+# 3. Pin the helper to one Apple TV UDID. Capture refuses to guess.
 appletv-screenshot configure --udid <UDID>
 
-# 4. Confirm
+# 4. Confirm. doctor reports the helper contract, the configured UDID, and one capture.
 uv run appletv-mcp doctor
 ```
 
-The Apple TV needs tvOS 17 or later with Developer Mode enabled and the developer disk image mounted. This developer pairing is separate from the `atvremote` pairing used for control. On macOS the helper can also ride Apple's own `remoted` tunnel without a daemon; see the helper README.
+The Apple TV needs tvOS 17 or later with Developer Mode enabled and the developer disk image mounted. This developer pairing is separate from the `atvremote` pairing used for control.
+
+The helper's default `auto` transport tries the macOS native `remoted` tunnel, then an in-process userspace tunnel over Wi-Fi RemotePairing, then a running privileged `tunneld`. Userspace is the no-root path on Linux and Windows. `sudo pymobiledevice3 remote tunneld` is a last resort, not the normal setup. See the helper README.
 
 Server-side settings live under `screen_capture` in the Apple TV MCP config file and all have defaults:
 
@@ -221,7 +222,7 @@ Remote navigation is a last resort. Prefer `apple_tv_open_app`, playback, seek, 
 | Feature unsupported | The TV/app does not implement that operation |
 | Uncertain execution error | A non-idempotent command may have been delivered; it was not retried |
 | Screenshot: helper could not be found | Install `appletv-screenshot` or set `screen_capture.command` to its absolute path; `doctor` shows what the server resolves |
-| Screenshot: pairing required | Run `pymobiledevice3 remote pair` for the Apple TV (separate from `atvremote`), keep `tunneld` running |
+| Screenshot: pairing required | Run `pymobiledevice3 remote pair` for the Apple TV (separate from `atvremote`). Userspace does not need a privileged tunneld |
 | Screenshot: helper found more than one Apple TV | `appletv-screenshot configure --udid <UDID>` |
 | Screenshot: timed out | Wake the TV, check the tunnel daemon, raise `screen_capture.timeout_seconds` (max 60) |
 | Screenshot is black | Protected content; the frame is real, the picture is withheld by the device |
