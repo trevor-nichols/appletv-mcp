@@ -6,7 +6,8 @@ import os
 import shutil
 import tempfile
 import time
-from asyncio.subprocess import DEVNULL, Process
+from asyncio.subprocess import DEVNULL, PIPE, Process
+from collections.abc import Sequence
 from pathlib import Path
 
 from appletv_mcp.domain.errors import (
@@ -30,6 +31,7 @@ from appletv_mcp.infrastructure.screen_capture.png import inspect_png
 logger = logging.getLogger(__name__)
 
 DEFAULT_TERMINATE_GRACE_SECONDS = 2.0
+HELPER_PROBE_TIMEOUT_SECONDS = 5.0
 _OUTPUT_FILENAME = "screen.png"
 _TEMP_PREFIX = "appletv-mcp-screen-"
 
@@ -42,6 +44,49 @@ def resolve_screen_capture_executable(settings: ScreenCaptureSettings) -> Path |
         return command if command.is_file() and os.access(command, os.X_OK) else None
     found = shutil.which(settings.command)
     return Path(found) if found is not None else None
+
+
+async def run_helper_command(
+    executable: Path,
+    arguments: Sequence[str],
+    *,
+    timeout_seconds: float = HELPER_PROBE_TIMEOUT_SECONDS,
+    terminate_grace_seconds: float = DEFAULT_TERMINATE_GRACE_SECONDS,
+) -> tuple[int, str]:
+    """Run the helper with stdout captured. Used by doctor probes, not by capture."""
+
+    process = await asyncio.create_subprocess_exec(
+        str(executable),
+        *arguments,
+        stdin=DEVNULL,
+        stdout=PIPE,
+        stderr=DEVNULL,
+    )
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            stdout, _stderr = await process.communicate()
+    except TimeoutError:
+        await _stop_process(process, terminate_grace_seconds)
+        raise
+    text = stdout.decode("utf-8", errors="replace").strip()
+    returncode = process.returncode
+    return (returncode if returncode is not None else 1), text
+
+
+async def _stop_process(process: Process, terminate_grace_seconds: float) -> None:
+    if process.returncode is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        async with asyncio.timeout(terminate_grace_seconds):
+            await process.wait()
+    except TimeoutError:
+        logger.warning("Screen-capture helper ignored SIGTERM; killing it")
+        process.kill()
+        await process.wait()
 
 
 class ExternalScreenCaptureBackend:
@@ -116,19 +161,7 @@ class ExternalScreenCaptureBackend:
         logger.debug("Screen-capture helper exited successfully after %.2fs", elapsed)
 
     async def _stop(self, process: Process) -> None:
-        if process.returncode is not None:
-            return
-        try:
-            process.terminate()
-        except ProcessLookupError:
-            return
-        try:
-            async with asyncio.timeout(self._terminate_grace_seconds):
-                await process.wait()
-        except TimeoutError:
-            logger.warning("Screen-capture helper ignored SIGTERM; killing it")
-            process.kill()
-            await process.wait()
+        await _stop_process(process, self._terminate_grace_seconds)
 
     def _load_output(self, output: Path) -> CapturedScreen:
         try:

@@ -112,7 +112,38 @@ async def test_doctor_captures_through_real_helper_when_present(tmp_path: Path) 
     code, output = await harness.run()
     assert code == 0
     assert f"OK Screen capture helper: {helper.executable}" in output
+    assert "OK Screen capture helper contract: contract=1" in output
+    assert "OK Screen capture target: udid=00008110-AAAA transport=auto" in output
     assert f"OK Screen capture: 2x2 PNG, {len(FAKE_SCREEN_PNG)} bytes" in output
+
+
+async def test_doctor_fails_helper_contract_mismatch_without_capturing(tmp_path: Path) -> None:
+    helper = install_fake_helper(tmp_path, "contract-mismatch")
+    settings = ScreenCaptureSettings(command=str(helper.executable))
+    backend = FakeScreenCaptureBackend()
+    harness = _Harness(tmp_path, screen_capture=settings, backend=backend)
+    code, output = await harness.run()
+    assert code == 0
+    assert "FAIL Screen capture helper contract:" in output
+    assert "contract=2" in output
+    assert "server expects 1" in output
+    assert "Screen capture target:" not in output
+    assert "Screen capture:" not in output
+    assert backend.calls == 0
+
+
+async def test_doctor_fails_missing_helper_udid_without_capturing(tmp_path: Path) -> None:
+    helper = install_fake_helper(tmp_path, "no-udid")
+    settings = ScreenCaptureSettings(command=str(helper.executable))
+    backend = FakeScreenCaptureBackend()
+    harness = _Harness(tmp_path, screen_capture=settings, backend=backend)
+    code, output = await harness.run()
+    assert code == 0
+    assert "OK Screen capture helper contract: contract=1" in output
+    assert "FAIL Screen capture target: no UDID configured" in output
+    assert "appletv-screenshot configure --udid" in output
+    assert "Screen capture:" not in output
+    assert backend.calls == 0
 
 
 async def test_doctor_reports_broken_helper_without_failing_control(tmp_path: Path) -> None:

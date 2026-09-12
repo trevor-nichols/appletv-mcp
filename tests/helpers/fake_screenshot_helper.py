@@ -36,6 +36,21 @@ def main() -> int:
     (state / "argv").write_text("\n".join(args), encoding="utf-8")
     (state / "cwd").write_text(str(Path.cwd()), encoding="utf-8")
     (state / "pid").write_text(str(os.getpid()), encoding="utf-8")
+
+    if args == ["--version"]:
+        contract = "2" if mode == "contract-mismatch" else "1"
+        print(
+            f"appletv-screenshot 0.2.0 contract={contract} pymobiledevice3=fake",
+            flush=True,
+        )
+        return 0
+    if args == ["identify"]:
+        if mode == "no-udid":
+            print('{"udid":null,"transport":"auto"}', flush=True)
+        else:
+            print('{"udid":"00008110-AAAA","transport":"auto"}', flush=True)
+        return 0
+
     print(STDOUT_NOISE, flush=True)
     print(STDERR_NOISE, file=sys.stderr, flush=True)
 

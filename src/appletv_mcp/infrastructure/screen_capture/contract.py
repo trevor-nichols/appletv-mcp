@@ -5,6 +5,7 @@ package. The helper's own `exit_codes.py` must stay identical to
 `HelperExitCode`; a test in this repository compares the two tables.
 """
 
+import re
 from enum import IntEnum
 
 from appletv_mcp.domain.errors import (
@@ -16,7 +17,11 @@ from appletv_mcp.domain.errors import (
 
 HELPER_CONTRACT_VERSION = 1
 HELPER_CAPTURE_SUBCOMMAND = "capture"
+HELPER_IDENTIFY_SUBCOMMAND = "identify"
 HELPER_OUTPUT_FLAG = "--output"
+HELPER_VERSION_FLAG = "--version"
+
+_CONTRACT_PATTERN = re.compile(r"\bcontract=(\d+)\b")
 
 
 class HelperExitCode(IntEnum):
@@ -103,3 +108,12 @@ def error_for_exit_status(returncode: int) -> ScreenCaptureError:
         raise ValueError("exit status 0 is not an error")
     error_type, message = _EXIT_ERRORS[code]
     return error_type(message)
+
+
+def parse_helper_contract_version(version_line: str) -> int | None:
+    """Read `contract=N` from helper `--version` output, or `None` if absent."""
+
+    match = _CONTRACT_PATTERN.search(version_line)
+    if match is None:
+        return None
+    return int(match.group(1))

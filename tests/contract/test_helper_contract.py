@@ -12,6 +12,7 @@ from appletv_mcp.infrastructure.screen_capture import (
     HELPER_CONTRACT_VERSION,
     HelperExitCode,
     error_for_exit_status,
+    parse_helper_contract_version,
 )
 
 SIDECAR_EXIT_CODES = (
@@ -40,6 +41,16 @@ def test_sidecar_exit_codes_match_the_helper_contract() -> None:
 
     assert contract_version == HELPER_CONTRACT_VERSION
     assert sidecar_table == {member.name: int(member) for member in HelperExitCode}
+
+
+def test_parse_helper_contract_version_reads_contract_n() -> None:
+    assert (
+        parse_helper_contract_version("appletv-screenshot 0.2.0 contract=1 pymobiledevice3=11.12.4")
+        == 1
+    )
+    assert parse_helper_contract_version("contract=99 extra") == 99
+    assert parse_helper_contract_version("") is None
+    assert parse_helper_contract_version("appletv-screenshot 0.2.0") is None
 
 
 def test_every_failure_code_maps_to_a_domain_error() -> None:

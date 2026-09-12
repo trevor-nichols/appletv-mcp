@@ -8,10 +8,12 @@ from appletv_mcp.infrastructure.screen_capture.contract import (
     HELPER_CONTRACT_VERSION,
     HelperExitCode,
     error_for_exit_status,
+    parse_helper_contract_version,
 )
 from appletv_mcp.infrastructure.screen_capture.external import (
     ExternalScreenCaptureBackend,
     resolve_screen_capture_executable,
+    run_helper_command,
 )
 from appletv_mcp.infrastructure.screen_capture.png import PngInfo, inspect_png
 
@@ -22,5 +24,7 @@ __all__ = [
     "PngInfo",
     "error_for_exit_status",
     "inspect_png",
+    "parse_helper_contract_version",
     "resolve_screen_capture_executable",
+    "run_helper_command",
 ]
