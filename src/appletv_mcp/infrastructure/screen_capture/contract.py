@@ -29,6 +29,7 @@ class HelperExitCode(IntEnum):
     CAPTURE_FAILED = 14
     OUTPUT_WRITE_FAILED = 15
     CAPTURE_TIMEOUT = 16
+    CONFIG_INVALID = 17
 
 
 HELPER_MISSING_MESSAGE = (
@@ -75,6 +76,11 @@ _EXIT_ERRORS: dict[HelperExitCode, tuple[type[ScreenCaptureError], str]] = {
         "private output file.",
     ),
     HelperExitCode.CAPTURE_TIMEOUT: (ScreenCaptureTimeoutError, TIMEOUT_MESSAGE),
+    HelperExitCode.CONFIG_INVALID: (
+        ScreenCaptureFailedError,
+        "The screen-capture helper's own configuration is invalid. Run "
+        "`appletv-screenshot configure` outside MCP to repair it.",
+    ),
 }
 
 

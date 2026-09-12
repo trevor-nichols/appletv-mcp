@@ -147,6 +147,7 @@ def test_resolve_executable_by_path_requires_executable_file(tmp_path: Path) -> 
         (HelperExitCode.CAPTURE_FAILED, ScreenCaptureFailedError, "did not return a screenshot"),
         (HelperExitCode.OUTPUT_WRITE_FAILED, ScreenCaptureFailedError, "could not write"),
         (HelperExitCode.CAPTURE_TIMEOUT, ScreenCaptureTimeoutError, "timed out"),
+        (HelperExitCode.CONFIG_INVALID, ScreenCaptureFailedError, "own configuration"),
         (99, ScreenCaptureFailedError, "status 99"),
     ],
 )
